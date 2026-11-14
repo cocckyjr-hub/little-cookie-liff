@@ -1,0 +1,876 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>家電操作</title>
+<style>
+  body {
+    margin: 0;
+    padding: 16px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f5f5f5;
+    color: #222;
+  }
+  h1 {
+    font-size: 18px;
+    margin: 0 0 16px;
+  }
+  .card {
+    background: white;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+  .device-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .device-name {
+    font-size: 17px;
+    font-weight: bold;
+  }
+  .device-name a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .device-status {
+    font-size: 13px;
+    margin-top: 4px;
+  }
+  .device-status.on { color: #06c755; }
+  .device-status.off { color: #999; }
+  .device-status.loading,
+  .device-status.error { color: #cc8400; }
+  .buttons { display: flex; gap: 8px; }
+  button {
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    background: #e0e0e0;
+    color: #333;
+  }
+  button.on-button.active { background: #06c755; color: white; }
+  button.off-button.active { background: #666; color: white; }
+  button:disabled { opacity: 0.5; }
+  button.mode-button.active,
+  button.fan-button.active { background: #06c755; color: white; }
+
+  .section-title {
+    font-size: 13px;
+    color: #888;
+    margin: 0 0 8px;
+  }
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .slider-row input[type="range"] { flex: 1; }
+  .slider-value { width: 48px; text-align: right; font-size: 14px; }
+  .button-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .temperature-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    margin-bottom: 16px;
+  }
+  .temperature-value { font-size: 32px; font-weight: bold; min-width: 70px; text-align: center; }
+  .dpad {
+    display: grid;
+    grid-template-columns: repeat(3, 64px);
+    grid-template-rows: repeat(3, 64px);
+    gap: 6px;
+    justify-content: center;
+    margin: 16px 0;
+  }
+  .dpad button { width: 100%; height: 100%; font-size: 20px; }
+  .channel-input-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .channel-input-row input {
+    flex: 1;
+    font-size: 16px;
+    padding: 8px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+  }
+  .back-link {
+    display: inline-block;
+    margin-bottom: 16px;
+    color: #06c755;
+    text-decoration: none;
+    font-size: 14px;
+  }
+  input[type="color"] {
+    width: 60px;
+    height: 40px;
+    border: none;
+    border-radius: 8px;
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+const DEVICES = [
+  { key: "lighting", label: "照明" },
+  { key: "aircon", label: "エアコン" },
+  { key: "chromecast", label: "Chromeキャスト" },
+  { key: "tv", label: "テレビ" },
+];
+
+const app = document.getElementById("app");
+
+// APIの呼び出し先（URLの先頭部分）。サーバーから配信するときは空文字
+// （同じ場所）、GitHub Pagesから配信するときはngrokのURLが入る
+// （app/web/liff_page.py・scripts/publish_liff_pages.py）
+const API_BASE = "https://agreeable-bullion-survey.ngrok-free.dev";
+
+async function callApi(path, options) {
+  // ngrok無料プランは、初回アクセスのブラウザに警告ページ(interstitial)を
+  // 挟む。このヘッダーを付けるとその警告をスキップできる（fetch()による
+  // 状態取得だけが警告ページに阻まれてサーバーへ届かず、常に「取得
+  // できませんでした」になる問題への対応、2026-08-02）
+  const mergedOptions = {
+    ...options,
+    headers: {
+      ...(options && options.headers),
+      "ngrok-skip-browser-warning": "true",
+    },
+  };
+
+  const response = await fetch(API_BASE + path, mergedOptions);
+  if (!response.ok) {
+    throw new Error("request failed");
+  }
+  return response.json();
+}
+
+function el(html) {
+  const template = document.createElement("template");
+  template.innerHTML = html.trim();
+  return template.content.firstChild;
+}
+
+// ---------- 一覧画面 ----------
+
+function renderOverview() {
+  app.appendChild(el(`<h1>家電操作</h1>`));
+  const list = el(`<div></div>`);
+  app.appendChild(list);
+
+  for (const device of DEVICES) {
+    const card = el(`
+      <div class="card device-card" id="card-${device.key}">
+        <div>
+          <div class="device-name"><a href="?device=${device.key}">${device.label}</a></div>
+          <div class="device-status loading" id="status-${device.key}">確認中...</div>
+        </div>
+        <div class="buttons">
+          <button class="on-button" id="on-${device.key}">ON</button>
+          <button class="off-button" id="off-${device.key}">OFF</button>
+        </div>
+      </div>
+    `);
+    list.appendChild(card);
+  }
+
+  for (const device of DEVICES) {
+    document.getElementById(`on-${device.key}`).addEventListener("click", () => {
+      setPowerState(device.key, "on");
+    });
+    document.getElementById(`off-${device.key}`).addEventListener("click", () => {
+      setPowerState(device.key, "off");
+    });
+  }
+
+  const alarmCard = el(`
+    <div class="card device-card" id="card-alarm" style="cursor: pointer;">
+      <div>
+        <div class="device-name">目覚まし</div>
+        <div class="device-status loading" id="status-alarm-overview">確認中...</div>
+      </div>
+    </div>
+  `);
+  alarmCard.addEventListener("click", () => {
+    location.href = "?device=alarm";
+  });
+  list.appendChild(alarmCard);
+
+  fetchStatuses();
+  fetchAlarmOverviewStatus();
+}
+
+async function fetchAlarmOverviewStatus() {
+  const statusEl = document.getElementById("status-alarm-overview");
+  if (!statusEl) return;
+
+  try {
+    const data = await callApi("/api/v1/appliances/alarm/detail");
+    statusEl.classList.remove("loading", "error");
+
+    if (!data.enabled) {
+      statusEl.textContent = "無効";
+    } else if (data.next_alarm) {
+      statusEl.textContent = `次回 ${data.next_alarm.scheduled_at.substring(11, 16)}`;
+    } else {
+      statusEl.textContent = "未設定";
+    }
+  } catch (error) {
+    statusEl.classList.remove("loading");
+    statusEl.classList.add("error");
+    statusEl.textContent = "取得できませんでした";
+  }
+}
+
+function setStatusText(key, state) {
+  const el = document.getElementById(`status-${key}`);
+  if (!el) return;
+  el.classList.remove("loading", "error", "on", "off");
+
+  if (state === "on") {
+    el.textContent = "ON";
+    el.classList.add("on");
+  } else if (state === "off") {
+    el.textContent = "OFF";
+    el.classList.add("off");
+  } else {
+    el.textContent = "取得できませんでした";
+    el.classList.add("error");
+  }
+
+  const onButton = document.getElementById(`on-${key}`);
+  const offButton = document.getElementById(`off-${key}`);
+  if (onButton) onButton.classList.toggle("active", state === "on");
+  if (offButton) offButton.classList.toggle("active", state === "off");
+}
+
+async function fetchStatuses() {
+  try {
+    const data = await callApi("/api/v1/appliances/status");
+    for (const device of DEVICES) {
+      setStatusText(device.key, data[device.key]);
+    }
+  } catch (error) {
+    for (const device of DEVICES) {
+      setStatusText(device.key, null);
+    }
+  }
+}
+
+async function setPowerState(key, state) {
+  const onButton = document.getElementById(`on-${key}`);
+  const offButton = document.getElementById(`off-${key}`);
+  if (onButton) onButton.disabled = true;
+  if (offButton) offButton.disabled = true;
+
+  try {
+    await callApi(`/api/v1/appliances/${key}/state`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state }),
+    });
+    setStatusText(key, state);
+  } catch (error) {
+    setStatusText(key, null);
+  } finally {
+    if (onButton) onButton.disabled = false;
+    if (offButton) offButton.disabled = false;
+  }
+}
+
+// ---------- 照明の詳細画面 ----------
+
+function renderLightingDetail() {
+  app.appendChild(el(`<a class="back-link" href="?">← 一覧へ戻る</a>`));
+  app.appendChild(el(`<h1>照明</h1>`));
+
+  const powerCard = el(`
+    <div class="card device-card">
+      <div class="device-status loading" id="status-lighting">確認中...</div>
+      <div class="buttons">
+        <button class="on-button" id="on-lighting">ON</button>
+        <button class="off-button" id="off-lighting">OFF</button>
+      </div>
+    </div>
+  `);
+  app.appendChild(powerCard);
+
+  const brightnessCard = el(`
+    <div class="card">
+      <p class="section-title">明るさ</p>
+      <div class="slider-row">
+        <input type="range" min="0" max="100" id="brightness-slider" />
+        <span class="slider-value" id="brightness-value">--%</span>
+      </div>
+    </div>
+  `);
+  app.appendChild(brightnessCard);
+
+  const colorTemperatureCard = el(`
+    <div class="card">
+      <p class="section-title">色温度（暖色 2700 〜 寒色 6500）</p>
+      <div class="slider-row">
+        <input type="range" min="2700" max="6500" step="100" id="color-temperature-slider" />
+        <span class="slider-value" id="color-temperature-value">--</span>
+      </div>
+    </div>
+  `);
+  app.appendChild(colorTemperatureCard);
+
+  const colorCard = el(`
+    <div class="card device-card">
+      <p class="section-title" style="margin: 0;">色</p>
+      <input type="color" id="color-picker" value="#ffffff" />
+    </div>
+  `);
+  app.appendChild(colorCard);
+
+  document.getElementById("on-lighting").addEventListener("click", () => setPowerState("lighting", "on"));
+  document.getElementById("off-lighting").addEventListener("click", () => setPowerState("lighting", "off"));
+
+  const brightnessSlider = document.getElementById("brightness-slider");
+  brightnessSlider.addEventListener("change", async () => {
+    document.getElementById("brightness-value").textContent = `${brightnessSlider.value}%`;
+    await callApi("/api/v1/appliances/lighting/brightness", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ brightness: Number(brightnessSlider.value) }),
+    });
+  });
+  brightnessSlider.addEventListener("input", () => {
+    document.getElementById("brightness-value").textContent = `${brightnessSlider.value}%`;
+  });
+
+  const colorTemperatureSlider = document.getElementById("color-temperature-slider");
+  colorTemperatureSlider.addEventListener("change", async () => {
+    document.getElementById("color-temperature-value").textContent = colorTemperatureSlider.value;
+    await callApi("/api/v1/appliances/lighting/color_temperature", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ color_temperature: Number(colorTemperatureSlider.value) }),
+    });
+  });
+  colorTemperatureSlider.addEventListener("input", () => {
+    document.getElementById("color-temperature-value").textContent = colorTemperatureSlider.value;
+  });
+
+  const colorPicker = document.getElementById("color-picker");
+  colorPicker.addEventListener("change", async () => {
+    const hex = colorPicker.value.replace("#", "");
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    await callApi("/api/v1/appliances/lighting/color", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ color: `${r}:${g}:${b}` }),
+    });
+  });
+
+  loadLightingDetail();
+}
+
+async function loadLightingDetail() {
+  try {
+    const data = await callApi("/api/v1/appliances/lighting/detail");
+    setStatusText("lighting", data.power);
+    if (data.brightness !== null && data.brightness !== undefined) {
+      document.getElementById("brightness-slider").value = data.brightness;
+      document.getElementById("brightness-value").textContent = `${data.brightness}%`;
+    }
+    if (data.color_temperature) {
+      document.getElementById("color-temperature-slider").value = data.color_temperature;
+      document.getElementById("color-temperature-value").textContent = data.color_temperature;
+    }
+    if (data.color && data.color !== "0:0:0") {
+      const [r, g, b] = data.color.split(":").map(Number);
+      const toHex = (n) => n.toString(16).padStart(2, "0");
+      document.getElementById("color-picker").value = `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+    }
+  } catch (error) {
+    setStatusText("lighting", null);
+  }
+}
+
+// ---------- エアコンの詳細画面 ----------
+
+const AIRCON_MODES = [
+  { key: "auto", label: "自動" },
+  { key: "cool", label: "冷房" },
+  { key: "dry", label: "除湿" },
+  { key: "fan", label: "送風" },
+  { key: "heat", label: "暖房" },
+];
+const AIRCON_FAN_SPEEDS = [
+  { key: "auto", label: "自動" },
+  { key: "low", label: "弱" },
+  { key: "medium", label: "中" },
+  { key: "high", label: "強" },
+];
+
+let aircon = { power: "off", temperature: 26, mode: "cool", fan_speed: "auto" };
+
+function renderAirconDetail() {
+  app.appendChild(el(`<a class="back-link" href="?">← 一覧へ戻る</a>`));
+  app.appendChild(el(`<h1>エアコン</h1>`));
+
+  const powerCard = el(`
+    <div class="card device-card">
+      <div class="device-status loading" id="status-aircon">確認中...</div>
+      <div class="buttons">
+        <button class="on-button" id="on-aircon">ON</button>
+        <button class="off-button" id="off-aircon">OFF</button>
+      </div>
+    </div>
+  `);
+  app.appendChild(powerCard);
+
+  const temperatureCard = el(`
+    <div class="card">
+      <p class="section-title">設定温度</p>
+      <div class="temperature-row">
+        <button id="temperature-down">−</button>
+        <div class="temperature-value" id="temperature-value">--℃</div>
+        <button id="temperature-up">＋</button>
+      </div>
+    </div>
+  `);
+  app.appendChild(temperatureCard);
+
+  const modeCard = el(`
+    <div class="card">
+      <p class="section-title">運転モード</p>
+      <div class="button-grid" id="mode-buttons"></div>
+    </div>
+  `);
+  app.appendChild(modeCard);
+  const modeButtons = modeCard.querySelector("#mode-buttons");
+  for (const mode of AIRCON_MODES) {
+    const button = el(`<button class="mode-button" id="mode-${mode.key}">${mode.label}</button>`);
+    modeButtons.appendChild(button);
+  }
+
+  const fanCard = el(`
+    <div class="card">
+      <p class="section-title">風量</p>
+      <div class="button-grid" id="fan-buttons"></div>
+    </div>
+  `);
+  app.appendChild(fanCard);
+  const fanButtons = fanCard.querySelector("#fan-buttons");
+  for (const fan of AIRCON_FAN_SPEEDS) {
+    const button = el(`<button class="fan-button" id="fan-${fan.key}">${fan.label}</button>`);
+    fanButtons.appendChild(button);
+  }
+
+  document.getElementById("on-aircon").addEventListener("click", () => {
+    aircon.power = "on";
+    submitAirconDetail();
+  });
+  document.getElementById("off-aircon").addEventListener("click", () => {
+    aircon.power = "off";
+    submitAirconDetail();
+  });
+  document.getElementById("temperature-up").addEventListener("click", () => {
+    aircon.temperature = Math.min(aircon.temperature + 1, 30);
+    submitAirconDetail();
+  });
+  document.getElementById("temperature-down").addEventListener("click", () => {
+    aircon.temperature = Math.max(aircon.temperature - 1, 16);
+    submitAirconDetail();
+  });
+  for (const mode of AIRCON_MODES) {
+    document.getElementById(`mode-${mode.key}`).addEventListener("click", () => {
+      aircon.mode = mode.key;
+      submitAirconDetail();
+    });
+  }
+  for (const fan of AIRCON_FAN_SPEEDS) {
+    document.getElementById(`fan-${fan.key}`).addEventListener("click", () => {
+      aircon.fan_speed = fan.key;
+      submitAirconDetail();
+    });
+  }
+
+  loadAirconDetail();
+}
+
+function renderAirconState() {
+  setStatusText("aircon", aircon.power);
+  document.getElementById("temperature-value").textContent = `${aircon.temperature}℃`;
+  for (const mode of AIRCON_MODES) {
+    document.getElementById(`mode-${mode.key}`).classList.toggle("active", aircon.mode === mode.key);
+  }
+  for (const fan of AIRCON_FAN_SPEEDS) {
+    document.getElementById(`fan-${fan.key}`).classList.toggle("active", aircon.fan_speed === fan.key);
+  }
+}
+
+async function loadAirconDetail() {
+  try {
+    aircon = await callApi("/api/v1/appliances/aircon/detail");
+    renderAirconState();
+  } catch (error) {
+    setStatusText("aircon", null);
+  }
+}
+
+async function submitAirconDetail() {
+  renderAirconState();
+  try {
+    await callApi("/api/v1/appliances/aircon/detail", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(aircon),
+    });
+  } catch (error) {
+    setStatusText("aircon", null);
+  }
+}
+
+// ---------- テレビの詳細画面 ----------
+
+function renderTvDetail() {
+  app.appendChild(el(`<a class="back-link" href="?">← 一覧へ戻る</a>`));
+  app.appendChild(el(`<h1>テレビ</h1>`));
+
+  const powerCard = el(`
+    <div class="card device-card">
+      <div class="device-status loading" id="status-tv">確認中...</div>
+      <div class="buttons">
+        <button class="on-button" id="on-tv">ON</button>
+        <button class="off-button" id="off-tv">OFF</button>
+      </div>
+    </div>
+  `);
+  app.appendChild(powerCard);
+
+  const volumeCard = el(`
+    <div class="card">
+      <p class="section-title">音量</p>
+      <div class="buttons">
+        <button id="volume-down">音量 −</button>
+        <button id="volume-up">音量 ＋</button>
+      </div>
+    </div>
+  `);
+  app.appendChild(volumeCard);
+
+  const channelCard = el(`
+    <div class="card">
+      <p class="section-title">チャンネル</p>
+      <div class="buttons" style="margin-bottom: 16px;">
+        <button id="channel-down">チャンネル −</button>
+        <button id="channel-up">チャンネル ＋</button>
+      </div>
+      <div class="channel-input-row">
+        <input type="number" id="channel-input" placeholder="チャンネル番号" />
+        <button id="channel-set">移動</button>
+      </div>
+    </div>
+  `);
+  app.appendChild(channelCard);
+
+  document.getElementById("on-tv").addEventListener("click", () => setPowerState("tv", "on"));
+  document.getElementById("off-tv").addEventListener("click", () => setPowerState("tv", "off"));
+
+  document.getElementById("volume-up").addEventListener("click", () => sendTvRemote("volume_up"));
+  document.getElementById("volume-down").addEventListener("click", () => sendTvRemote("volume_down"));
+  document.getElementById("channel-up").addEventListener("click", () => sendTvRemote("channel_up"));
+  document.getElementById("channel-down").addEventListener("click", () => sendTvRemote("channel_down"));
+  document.getElementById("channel-set").addEventListener("click", async () => {
+    const channel = Number(document.getElementById("channel-input").value);
+    if (!channel) return;
+    await callApi("/api/v1/appliances/tv/channel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel }),
+    });
+  });
+
+  fetchStatusFor("tv");
+}
+
+async function fetchStatusFor(key) {
+  try {
+    const data = await callApi("/api/v1/appliances/status");
+    setStatusText(key, data[key]);
+  } catch (error) {
+    setStatusText(key, null);
+  }
+}
+
+async function sendTvRemote(action) {
+  await callApi("/api/v1/appliances/tv/remote", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+  });
+}
+
+// ---------- Chromecastの詳細画面 ----------
+
+function renderChromecastDetail() {
+  app.appendChild(el(`<a class="back-link" href="?">← 一覧へ戻る</a>`));
+  app.appendChild(el(`<h1>Chromeキャスト</h1>`));
+
+  const powerCard = el(`
+    <div class="card device-card">
+      <div class="device-status loading" id="status-chromecast">確認中...</div>
+      <div class="buttons">
+        <button class="on-button" id="on-chromecast">ON</button>
+        <button class="off-button" id="off-chromecast">OFF</button>
+      </div>
+    </div>
+  `);
+  app.appendChild(powerCard);
+
+  const dpadCard = el(`
+    <div class="card">
+      <p class="section-title">十字キー</p>
+      <div class="dpad">
+        <div></div><button id="key-up">▲</button><div></div>
+        <button id="key-left">◀</button><button id="key-select">決定</button><button id="key-right">▶</button>
+        <div></div><button id="key-down">▼</button><div></div>
+      </div>
+      <div class="buttons">
+        <button id="key-home">ホーム</button>
+        <button id="key-back">戻る</button>
+      </div>
+    </div>
+  `);
+  app.appendChild(dpadCard);
+
+  const controlCard = el(`
+    <div class="card">
+      <p class="section-title">音量・再生</p>
+      <div class="buttons">
+        <button id="key-volume-down">音量 −</button>
+        <button id="key-volume-up">音量 ＋</button>
+        <button id="key-play-pause">再生/一時停止</button>
+      </div>
+    </div>
+  `);
+  app.appendChild(controlCard);
+
+  document.getElementById("on-chromecast").addEventListener("click", () => setPowerState("chromecast", "on"));
+  document.getElementById("off-chromecast").addEventListener("click", () => setPowerState("chromecast", "off"));
+
+  const keyMap = {
+    "key-up": "up",
+    "key-down": "down",
+    "key-left": "left",
+    "key-right": "right",
+    "key-select": "select",
+    "key-home": "home",
+    "key-back": "back",
+    "key-volume-up": "volume_up",
+    "key-volume-down": "volume_down",
+    "key-play-pause": "play_pause",
+  };
+  for (const [elementId, action] of Object.entries(keyMap)) {
+    document.getElementById(elementId).addEventListener("click", () => sendChromecastRemote(action));
+  }
+
+  fetchStatusFor("chromecast");
+}
+
+async function sendChromecastRemote(action) {
+  await callApi("/api/v1/appliances/chromecast/remote", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+  });
+}
+
+// ---------- 目覚ましの詳細画面 ----------
+
+function renderAlarmDetail() {
+  app.appendChild(el(`<a class="back-link" href="?">← 一覧へ戻る</a>`));
+  app.appendChild(el(`<h1>目覚まし</h1>`));
+
+  const enabledCard = el(`
+    <div class="card device-card">
+      <div>
+        <div class="device-name">目覚ましアラーム</div>
+        <div class="device-status loading" id="status-alarm-enabled">確認中...</div>
+      </div>
+      <div class="buttons">
+        <button class="on-button" id="on-alarm-enabled">ON</button>
+        <button class="off-button" id="off-alarm-enabled">OFF</button>
+      </div>
+    </div>
+  `);
+  app.appendChild(enabledCard);
+
+  const nextCard = el(`
+    <div class="card">
+      <p class="section-title">次回の予定</p>
+      <div id="next-alarm-info">確認中...</div>
+    </div>
+  `);
+  app.appendChild(nextCard);
+
+  const timeCard = el(`
+    <div class="card">
+      <p class="section-title">時刻を変更（次回分のみ。日付はそのまま）</p>
+      <div class="channel-input-row">
+        <input type="time" id="alarm-time-input" />
+        <button id="alarm-time-set">変更</button>
+      </div>
+    </div>
+  `);
+  app.appendChild(timeCard);
+
+  document.getElementById("on-alarm-enabled").addEventListener("click", () => setAlarmEnabled(true));
+  document.getElementById("off-alarm-enabled").addEventListener("click", () => setAlarmEnabled(false));
+  document.getElementById("alarm-time-set").addEventListener("click", setAlarmTime);
+
+  loadAlarmDetail();
+}
+
+function renderNextAlarmInfo(nextAlarm) {
+  const info = document.getElementById("next-alarm-info");
+  if (!info) return;
+
+  if (nextAlarm) {
+    info.textContent = `${nextAlarm.target_date} ${nextAlarm.scheduled_at.substring(11, 16)}`;
+  } else {
+    info.textContent = "予約されていません";
+  }
+}
+
+// 時刻入力欄の初期値を、予約済みの目覚まし時刻にする。予約が無い場合は、
+// 次の朝の通知時刻を仮で入れておく
+// （空のままだとiPhoneでは「今の時刻」から選び始めることになり、
+// 少しだけずらしたい時に毎回大きく回す必要があるため）
+function fillAlarmTimeInput(nextAlarm) {
+  const input = document.getElementById("alarm-time-input");
+  if (!input) return;
+
+  if (nextAlarm) {
+    input.value = nextAlarm.scheduled_at.substring(11, 16);
+    return;
+  }
+
+  fillSuggestedAlarmTime(input);
+}
+
+// 次の朝の通知時刻を取りに行き、入力欄に仮で入れる。カレンダーの読み込みで
+// 数秒かかるため、ON/OFFの表示とは別に後から埋める。待っている間に自分で
+// 時刻を選び始めていた場合は、その値を上書きしない
+async function fillSuggestedAlarmTime(input) {
+  try {
+    const data = await callApi("/api/v1/appliances/alarm/suggested-time");
+    if (data.suggested_time && !input.value) {
+      input.value = data.suggested_time;
+    }
+  } catch (error) {
+    // 仮の初期値なので、取れなければ空欄のままにする
+  }
+}
+
+async function loadAlarmDetail() {
+  try {
+    const data = await callApi("/api/v1/appliances/alarm/detail");
+    setStatusText("alarm-enabled", data.enabled ? "on" : "off");
+    renderNextAlarmInfo(data.next_alarm);
+    fillAlarmTimeInput(data.next_alarm);
+  } catch (error) {
+    setStatusText("alarm-enabled", null);
+  }
+}
+
+async function setAlarmEnabled(enabled) {
+  const onButton = document.getElementById("on-alarm-enabled");
+  const offButton = document.getElementById("off-alarm-enabled");
+  if (onButton) onButton.disabled = true;
+  if (offButton) offButton.disabled = true;
+
+  try {
+    await callApi("/api/v1/appliances/alarm/enabled", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    await loadAlarmDetail();
+  } catch (error) {
+    setStatusText("alarm-enabled", null);
+  } finally {
+    if (onButton) onButton.disabled = false;
+    if (offButton) offButton.disabled = false;
+  }
+}
+
+async function setAlarmTime() {
+  const value = document.getElementById("alarm-time-input").value;
+  if (!value) return;
+
+  const button = document.getElementById("alarm-time-set");
+  button.disabled = true;
+
+  try {
+    await callApi("/api/v1/appliances/alarm/time", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ time: value }),
+    });
+    await loadAlarmDetail();
+  } catch (error) {
+    alert("設定に失敗しました（目覚ましがOFFになっている可能性があります）");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+// ---------- 起動時のルーティング ----------
+//
+// リッチメニューのボタンは https://liff.line.me/{liffId}?device=lighting
+// のようなURLを開くが、この"?device=lighting"部分はliff.init()が
+// 解決するまでlocation.searchには現れない（LIFFが内部的に
+// "liff.state"というパラメータへ包んでリダイレクトするため）。
+// そのため、location.searchの読み取りは必ずliff.init()のthen内で行う。
+
+liff.init({ liffId: "2010907901-q0rIoeNw" })
+  .then(() => {
+    const params = new URLSearchParams(location.search);
+    const currentDevice = params.get("device");
+
+    if (currentDevice === "lighting") {
+      renderLightingDetail();
+    } else if (currentDevice === "aircon") {
+      renderAirconDetail();
+    } else if (currentDevice === "tv") {
+      renderTvDetail();
+    } else if (currentDevice === "chromecast") {
+      renderChromecastDetail();
+    } else if (currentDevice === "alarm") {
+      renderAlarmDetail();
+    } else {
+      renderOverview();
+    }
+  })
+  .catch((error) => {
+    app.textContent = "LIFFの初期化に失敗しました: " + error.message;
+  });
+</script>
+</body>
+</html>
