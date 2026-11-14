@@ -283,6 +283,25 @@ function renderCard(card) {
   return box;
 }
 
+// ---------- 支払い方法（Suica・PayPay等） ----------
+
+function renderPaymentMethod(method) {
+  const box = element("div", "card");
+  box.appendChild(element("div", "name", method.method_name));
+  if (method.funding_source) {
+    box.appendChild(labeledText("チャージ・支払い元", method.funding_source));
+  }
+  if (method.usage) box.appendChild(labeledText("使い方", method.usage));
+  if (method.notes) box.appendChild(labeledList("注意", [method.notes], "caution"));
+  method.linked_cards.forEach((card) => {
+    if (card.reward_rules.length === 0) return;
+    box.appendChild(
+      labeledList(`${card.card_name}の還元ルール`, card.reward_rules.map(formatRule))
+    );
+  });
+  return box;
+}
+
 // ---------- 銀行口座・支払い先 ----------
 
 function renderBankAccount(account) {
@@ -339,6 +358,10 @@ function cardSummary(card) {
       card.debit_account ? `引き落とし: ${card.debit_account}` : null,
     ].filter((item) => item).join("・"),
   };
+}
+
+function paymentMethodSummary(method) {
+  return { text: method.funding_source ? `元: ${method.funding_source}` : "" };
 }
 
 function bankSummary(account) {
@@ -398,6 +421,12 @@ function showList() {
         element("span", "badge " + card.status, card.status_label),
         () => showDetail(renderCard(card))
       ), "登録されたカードはありません")
+  );
+  app.appendChild(
+    listSection("支払い方法", overview.payment_methods, (method) =>
+      listRow(method.method_name, paymentMethodSummary(method), null, () =>
+        showDetail(renderPaymentMethod(method))
+      ), "登録された支払い方法はありません")
   );
   app.appendChild(
     listSection("銀行口座", overview.bank_accounts, (account) =>
