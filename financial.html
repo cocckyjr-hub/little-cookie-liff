@@ -313,6 +313,11 @@ function renderBankAccount(account) {
       labeledText("ここから引き落とされるカード", account.debit_cards.join("、"))
     );
   }
+  if (account.transfer_fee) {
+    box.appendChild(
+      labeledList("振込手数料（この口座から送るとき）", splitLines(account.transfer_fee))
+    );
+  }
   if (account.notes) box.appendChild(labeledList("注意", [account.notes], "caution"));
   return box;
 }
@@ -366,6 +371,14 @@ function paymentMethodSummary(method) {
 
 function bankSummary(account) {
   return { text: account.purpose || "" };
+}
+
+// 改行区切りの文章を1行ずつに分ける（先頭の「・」は外す）
+function splitLines(text) {
+  return text
+    .split("\n")
+    .map((line) => line.trim().replace(/^・/, ""))
+    .filter((line) => line);
 }
 
 function payeeSummary(payee) {
