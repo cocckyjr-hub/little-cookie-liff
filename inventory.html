@@ -1,0 +1,823 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>インベントリ</title>
+<style>
+  body {
+    margin: 0;
+    padding: 0 0 40px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f5f5f5;
+    color: #222;
+    line-height: 1.5;
+  }
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: #f5f5f5;
+    padding: 12px 16px 0;
+  }
+  h1 { font-size: 18px; margin: 0 0 10px; }
+  h2 { font-size: 14px; margin: 20px 0 8px; color: #666; }
+  main { padding: 0 16px; }
+  .tabs { display: flex; gap: 6px; padding-bottom: 10px; }
+  .tab {
+    flex: 1;
+    border: none;
+    border-radius: 18px;
+    padding: 8px 0;
+    font-size: 13px;
+    font-weight: bold;
+    background: #e4e4e4;
+    color: #555;
+    cursor: pointer;
+  }
+  .tab.active { background: #06c755; color: white; }
+  .list {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid #eee;
+  }
+  .row:last-child { border-bottom: none; }
+  .row-body { flex: 1; min-width: 0; cursor: pointer; }
+  .row-title { font-size: 15px; font-weight: bold; word-break: break-all; }
+  .row-sub { font-size: 12px; color: #888; margin-top: 2px; word-break: break-all; }
+  .row.done .row-title { color: #aaa; text-decoration: line-through; font-weight: normal; }
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: #e0e0e0;
+    color: #333;
+    margin-right: 4px;
+    vertical-align: 1px;
+    font-weight: normal;
+  }
+  .badge.amazon { background: #ff9900; color: white; }
+  .badge.ai { background: #7b61ff; color: white; }
+  .badge.warn { background: #cc3300; color: white; }
+  .counter { display: flex; align-items: center; gap: 6px; }
+  .counter button {
+    width: 38px;
+    height: 38px;
+    border: none;
+    border-radius: 50%;
+    font-size: 20px;
+    font-weight: bold;
+    background: #eee;
+    color: #333;
+    cursor: pointer;
+    padding: 0;
+  }
+  .counter button.plus { background: #06c755; color: white; }
+  .count { min-width: 28px; text-align: center; font-size: 18px; font-weight: bold; }
+  .count.zero { color: #cc3300; }
+  .count.unknown { color: #bbb; font-size: 14px; }
+  .check {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 2px solid #bbb;
+    background: white;
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 0;
+    font-size: 15px;
+    color: white;
+  }
+  .check.on { background: #06c755; border-color: #06c755; }
+  .add-box {
+    display: flex;
+    gap: 8px;
+    margin: 4px 0 12px;
+  }
+  .add-box input { flex: 1; }
+  input, select, textarea {
+    font-size: 16px;
+    padding: 9px 10px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    background: white;
+    box-sizing: border-box;
+    width: 100%;
+    font-family: inherit;
+  }
+  textarea { min-height: 70px; }
+  button.primary, button.secondary, button.danger {
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button.primary { background: #06c755; color: white; }
+  button.secondary { background: #e0e0e0; color: #333; }
+  button.danger { background: white; color: #cc3300; border: 1px solid #cc3300; }
+  button:disabled { opacity: 0.5; }
+  .add-wide { width: 100%; margin-top: 12px; }
+  .form { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; color: #777; margin-bottom: 4px; }
+  .field.inline { display: flex; align-items: center; gap: 8px; }
+  .field.inline input { width: auto; }
+  .field.inline label { margin: 0; font-size: 14px; color: #333; }
+  .form-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+  .form-buttons .primary { flex: 1; }
+  .empty { padding: 16px; font-size: 13px; color: #999; text-align: center; }
+  .muted { font-size: 12px; color: #999; }
+  .error { color: #cc3300; padding: 16px; }
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 18px;
+    font-size: 13px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+    max-width: 80%;
+    text-align: center;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>インベントリ</h1>
+  <div class="tabs" id="tabs"></div>
+</header>
+<main id="app">読み込み中…</main>
+<div class="toast" id="toast"></div>
+
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+const app = document.getElementById("app");
+const tabsNode = document.getElementById("tabs");
+
+// APIの呼び出し先（URLの先頭部分）。サーバーから配信するときは空文字
+// （同じ場所）、GitHub Pagesから配信するときはngrokのURLが入る
+// （app/web/liff_page.py・scripts/publish_liff_pages.py）
+const API_BASE = "https://agreeable-bullion-survey.ngrok-free.dev";
+
+const TABS = [
+  { key: "stock", label: "在庫" },
+  { key: "possessions", label: "所有物" },
+  { key: "shopping", label: "買い物" },
+  { key: "wish", label: "ほしい物" },
+];
+
+const POSSESSION_STATUS = { in_use: "使用中", in_storage: "保管中", broken: "故障" };
+
+// 所有物の分類で、英語のまま登録されているものの表示名
+const CATEGORY_LABELS = {
+  audio: "オーディオ",
+  wearable: "ウェアラブル",
+  mobile_device: "スマホ・タブレット",
+  computer_accessory: "パソコン周り",
+};
+
+let data = null;
+let currentTab = "stock";
+let listScrollY = 0;
+
+// ---------- 共通の部品 ----------
+
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+
+function formatDate(isoText) {
+  if (!isoText) return "";
+  const [, month, day] = isoText.split("-");
+  return `${Number(month)}/${Number(day)}`;
+}
+
+let toastTimer = null;
+function toast(message) {
+  const node = document.getElementById("toast");
+  node.textContent = message;
+  node.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => node.classList.remove("show"), 1800);
+}
+
+function emptyText(text) {
+  const list = element("div", "list");
+  list.appendChild(element("div", "empty", text));
+  return list;
+}
+
+// ---------- APIの呼び出し（本人確認のためLINEのアクセストークンを付ける） ----------
+//
+// ngrok無料プランの警告ページを飛ばすため"ngrok-skip-browser-warning"を付ける
+// （家電操作・フィナンシャルサポートと同じ対策）
+
+async function callApi(path, options = {}) {
+  const response = await fetch(API_BASE + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
+      Authorization: `Bearer ${liff.getAccessToken()}`,
+    },
+  });
+  const text = await response.text();
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`サーバーから想定外の応答がありました（${response.status}）`);
+  }
+  if (!response.ok) throw new Error(body.message || "通信に失敗しました");
+  return body;
+}
+
+function send(method, path, body) {
+  return callApi(path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+}
+
+async function reload() {
+  data = await callApi("/api/v1/inventory/overview");
+}
+
+// ---------- タブ ----------
+
+function renderTabs() {
+  tabsNode.textContent = "";
+  TABS.forEach((tab) => {
+    const button = element("button", "tab" + (tab.key === currentTab ? " active" : ""), tab.label);
+    button.addEventListener("click", () => {
+      currentTab = tab.key;
+      try { localStorage.setItem("inventoryTab", currentTab); } catch (error) {}
+      showList(0);
+    });
+    tabsNode.appendChild(button);
+  });
+}
+
+function showList(scrollY) {
+  renderTabs();
+  app.textContent = "";
+  const renderers = {
+    stock: renderStockTab,
+    possessions: renderPossessionTab,
+    shopping: () => renderListTab("shopping"),
+    wish: () => renderListTab("wish"),
+  };
+  renderers[currentTab]();
+  window.scrollTo(0, scrollY === undefined ? listScrollY : scrollY);
+}
+
+function showForm(title, formNode) {
+  listScrollY = window.scrollY;
+  app.textContent = "";
+  const back = element("button", "secondary", "‹ 一覧に戻る");
+  back.addEventListener("click", () => showList());
+  back.style.margin = "4px 0 12px";
+  app.appendChild(back);
+  app.appendChild(element("h2", null, title));
+  app.appendChild(formNode);
+  window.scrollTo(0, 0);
+}
+
+// ---------- フォームの部品 ----------
+
+function field(label, input) {
+  const wrapper = element("div", "field");
+  wrapper.appendChild(element("label", null, label));
+  wrapper.appendChild(input);
+  return wrapper;
+}
+
+function textInput(value, type = "text") {
+  const input = element("input");
+  input.type = type;
+  input.value = value === null || value === undefined ? "" : value;
+  return input;
+}
+
+function textArea(value) {
+  const input = element("textarea");
+  input.value = value || "";
+  return input;
+}
+
+function selectInput(options, value) {
+  const select = element("select");
+  Object.entries(options).forEach(([key, label]) => {
+    const option = element("option", null, label);
+    option.value = key;
+    select.appendChild(option);
+  });
+  select.value = value;
+  return select;
+}
+
+function checkboxField(label, checked) {
+  const wrapper = element("div", "field inline");
+  const input = element("input");
+  input.type = "checkbox";
+  input.checked = checked;
+  input.id = "cb-" + Math.random().toString(36).slice(2);
+  const labelNode = element("label", null, label);
+  labelNode.htmlFor = input.id;
+  wrapper.appendChild(input);
+  wrapper.appendChild(labelNode);
+  return { wrapper, input };
+}
+
+function numberOrNull(input) {
+  return input.value.trim() === "" ? null : Number(input.value);
+}
+
+function textOrNull(input) {
+  return input.value.trim() === "" ? null : input.value.trim();
+}
+
+// ボタンを押している間は二重に押せないようにし、失敗したら知らせる
+async function runAction(button, action) {
+  button.disabled = true;
+  try {
+    await action();
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+// ---------- 在庫 ----------
+
+function stockSub(item) {
+  const parts = [];
+  if (item.is_amazon_subscription) {
+    if (item.cycle_months) parts.push(`${item.cycle_months}か月ごと`);
+    if (item.next_purchase_date) parts.push(`次回 ${formatDate(item.next_purchase_date)}`);
+  } else if (item.purchase_type === "periodic" && item.next_purchase_date) {
+    parts.push(`次の購入 ${formatDate(item.next_purchase_date)}`);
+  }
+  return parts.join("・");
+}
+
+function stockRow(item) {
+  const row = element("div", "row");
+  const body = element("div", "row-body");
+  const title = element("div", "row-title");
+  if (item.is_amazon_subscription) title.appendChild(element("span", "badge amazon", "定期便"));
+  title.appendChild(document.createTextNode(item.item_name));
+  body.appendChild(title);
+  const sub = stockSub(item);
+  if (sub) body.appendChild(element("div", "row-sub", sub));
+  body.addEventListener("click", () => showStockForm(item));
+  row.appendChild(body);
+
+  const counter = element("div", "counter");
+  const minus = element("button", null, "−");
+  const count = element("span", "count");
+  const plus = element("button", "plus", "+");
+
+  function showCount() {
+    if (item.stock_count === null || item.stock_count === undefined) {
+      count.textContent = "–";
+      count.className = "count unknown";
+    } else {
+      count.textContent = item.stock_count;
+      count.className = "count" + (item.stock_count === 0 ? " zero" : "");
+    }
+  }
+
+  async function adjust(delta, button) {
+    await runAction(button, async () => {
+      const updated = await send("POST", `/api/v1/inventory/stock/${item.id}/adjust`, { delta });
+      item.stock_count = updated.stock_count;
+      showCount();
+      if (updated.stock_count === 0) toast(`${item.item_name}の在庫が0になりました`);
+    });
+  }
+
+  minus.addEventListener("click", () => adjust(-1, minus));
+  plus.addEventListener("click", () => adjust(1, plus));
+  showCount();
+  counter.appendChild(minus);
+  counter.appendChild(count);
+  counter.appendChild(plus);
+  row.appendChild(counter);
+  return row;
+}
+
+function stockSection(title, items) {
+  const section = element("div");
+  section.appendChild(element("h2", null, `${title}（${items.length}）`));
+  if (!items.length) {
+    section.appendChild(emptyText("ありません"));
+    return section;
+  }
+  const list = element("div", "list");
+  items.forEach((item) => list.appendChild(stockRow(item)));
+  section.appendChild(list);
+  return section;
+}
+
+function renderStockTab() {
+  app.appendChild(
+    element("div", "muted", "＋／−で在庫数を増減できます。名前をタップすると編集できます。")
+  );
+  const subscriptions = data.stock_items.filter((item) => item.is_amazon_subscription);
+  const others = data.stock_items.filter((item) => !item.is_amazon_subscription);
+  app.appendChild(stockSection("Amazon定期便", subscriptions));
+  app.appendChild(stockSection("そのほかの在庫", others));
+
+  const add = element("button", "primary add-wide", "＋ 品目を追加");
+  add.addEventListener("click", () => showStockForm(null));
+  app.appendChild(add);
+}
+
+function showStockForm(item) {
+  const isNew = item === null;
+  const value = item || {
+    item_name: "", purchase_type: "as_needed", cycle_months: null,
+    next_purchase_date: null, stock_count: null, notes: "", is_amazon_subscription: 0,
+  };
+  const form = element("div", "form");
+  const name = textInput(value.item_name);
+  const type = selectInput(
+    { as_needed: "なくなったら買う", periodic: "決まった周期で買う・届く" },
+    value.purchase_type
+  );
+  const amazon = checkboxField("Amazon定期おトク便で届く", Boolean(value.is_amazon_subscription));
+  const cycle = textInput(value.cycle_months, "number");
+  const next = textInput(value.next_purchase_date, "date");
+  const count = textInput(value.stock_count, "number");
+  const notes = textArea(value.notes);
+
+  form.appendChild(field("名前", name));
+  form.appendChild(field("買い方", type));
+  form.appendChild(amazon.wrapper);
+  form.appendChild(field("周期（何か月ごと）", cycle));
+  form.appendChild(field("次のお届け・購入日", next));
+  form.appendChild(field("在庫数", count));
+  form.appendChild(field("メモ", notes));
+
+  const buttons = element("div", "form-buttons");
+  const save = element("button", "primary", isNew ? "追加" : "保存");
+  save.addEventListener("click", () =>
+    runAction(save, async () => {
+      const isAmazon = amazon.input.checked;
+      const body = {
+        item_name: name.value,
+        purchase_type: isAmazon ? "periodic" : type.value,
+        cycle_months: numberOrNull(cycle),
+        next_purchase_date: textOrNull(next),
+        stock_count: numberOrNull(count),
+        notes: textOrNull(notes),
+        is_amazon_subscription: isAmazon,
+      };
+      if (isNew) await send("POST", "/api/v1/inventory/stock", body);
+      else await send("PATCH", `/api/v1/inventory/stock/${item.id}`, body);
+      await reload();
+      toast(isNew ? "追加しました" : "保存しました");
+      showList();
+    })
+  );
+  buttons.appendChild(save);
+
+  if (!isNew) {
+    const toShopping = element("button", "secondary", "買い物リストへ");
+    toShopping.addEventListener("click", () =>
+      runAction(toShopping, async () => {
+        const result = await send("POST", "/api/v1/inventory/lists/shopping", {
+          item_name: item.item_name,
+        });
+        await reload();
+        toast(result.created ? "買い物リストに入れました" : "すでに買い物リストにあります");
+      })
+    );
+    buttons.appendChild(toShopping);
+
+    const remove = element("button", "danger", "管理をやめる");
+    remove.addEventListener("click", () => {
+      if (!confirm(`「${item.item_name}」を在庫の一覧から外しますか？`)) return;
+      runAction(remove, async () => {
+        await send("DELETE", `/api/v1/inventory/stock/${item.id}`);
+        await reload();
+        toast("一覧から外しました");
+        showList();
+      });
+    });
+    buttons.appendChild(remove);
+  }
+  form.appendChild(buttons);
+  showForm(isNew ? "在庫の品目を追加" : "在庫の品目を編集", form);
+}
+
+// ---------- 所有物 ----------
+
+function categoryLabel(category) {
+  if (!category) return "未分類";
+  return CATEGORY_LABELS[category] || category;
+}
+
+function possessionSub(item) {
+  const parts = [];
+  if (item.status !== "in_use") parts.push(POSSESSION_STATUS[item.status] || item.status);
+  if (item.storage_location) parts.push(item.storage_location);
+  if (item.warranty_expiry_date) {
+    const expired = item.warranty_expiry_date < data.today;
+    parts.push(`保証${expired ? "切れ" : ""} ${item.warranty_expiry_date}`);
+  }
+  return parts.join("・");
+}
+
+function renderPossessionTab() {
+  const groups = {};
+  data.possessions.forEach((item) => {
+    const key = categoryLabel(item.category);
+    (groups[key] = groups[key] || []).push(item);
+  });
+  const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b, "ja"));
+  if (!keys.length) app.appendChild(emptyText("登録された所有物はありません"));
+
+  keys.forEach((key) => {
+    app.appendChild(element("h2", null, `${key}（${groups[key].length}）`));
+    const list = element("div", "list");
+    groups[key].forEach((item) => {
+      const row = element("div", "row");
+      const body = element("div", "row-body");
+      const title = element("div", "row-title");
+      if (item.status === "broken") title.appendChild(element("span", "badge warn", "故障"));
+      title.appendChild(document.createTextNode(item.item_name));
+      body.appendChild(title);
+      const sub = possessionSub(item);
+      if (sub) body.appendChild(element("div", "row-sub", sub));
+      body.addEventListener("click", () => showPossessionForm(item));
+      row.appendChild(body);
+      row.appendChild(element("span", "muted", "›"));
+      list.appendChild(row);
+    });
+    app.appendChild(list);
+  });
+
+  const add = element("button", "primary add-wide", "＋ 所有物を追加");
+  add.addEventListener("click", () => showPossessionForm(null));
+  app.appendChild(add);
+}
+
+function showPossessionForm(item) {
+  const isNew = item === null;
+  const value = item || { status: "in_use" };
+  const form = element("div", "form");
+  const inputs = {
+    item_name: textInput(value.item_name),
+    category: textInput(value.category ? categoryLabel(value.category) : ""),
+    manufacturer: textInput(value.manufacturer),
+    model_number: textInput(value.model_number),
+    purchase_date: textInput(value.purchase_date, "date"),
+    purchase_price: textInput(value.purchase_price, "number"),
+    warranty_expiry_date: textInput(value.warranty_expiry_date, "date"),
+    storage_location: textInput(value.storage_location),
+    status: selectInput(POSSESSION_STATUS, value.status),
+    notes: textArea(value.notes),
+  };
+  form.appendChild(field("名前", inputs.item_name));
+  form.appendChild(field("分類（例: ガジェット・家電・家具）", inputs.category));
+  form.appendChild(field("メーカー", inputs.manufacturer));
+  form.appendChild(field("型番", inputs.model_number));
+  form.appendChild(field("購入日", inputs.purchase_date));
+  form.appendChild(field("購入金額（円）", inputs.purchase_price));
+  form.appendChild(field("保証期限", inputs.warranty_expiry_date));
+  form.appendChild(field("置き場所", inputs.storage_location));
+  form.appendChild(field("状態", inputs.status));
+  form.appendChild(field("メモ", inputs.notes));
+
+  const buttons = element("div", "form-buttons");
+  const save = element("button", "primary", isNew ? "追加" : "保存");
+  save.addEventListener("click", () =>
+    runAction(save, async () => {
+      const categoryText = textOrNull(inputs.category);
+      // 英語の分類を表示名のまま保存し直さないよう、変えていなければ元の値を使う
+      const category =
+        item && categoryText === categoryLabel(item.category) ? item.category : categoryText;
+      const body = {
+        item_name: inputs.item_name.value,
+        category,
+        manufacturer: textOrNull(inputs.manufacturer),
+        model_number: textOrNull(inputs.model_number),
+        purchase_date: textOrNull(inputs.purchase_date),
+        purchase_price: numberOrNull(inputs.purchase_price),
+        warranty_expiry_date: textOrNull(inputs.warranty_expiry_date),
+        storage_location: textOrNull(inputs.storage_location),
+        status: inputs.status.value,
+        notes: textOrNull(inputs.notes),
+      };
+      if (isNew) await send("POST", "/api/v1/inventory/possessions", body);
+      else await send("PATCH", `/api/v1/inventory/possessions/${item.id}`, body);
+      await reload();
+      toast(isNew ? "追加しました" : "保存しました");
+      showList();
+    })
+  );
+  buttons.appendChild(save);
+
+  if (!isNew) {
+    const remove = element("button", "danger", "手放した");
+    remove.addEventListener("click", () => {
+      if (!confirm(`「${item.item_name}」を手放した物として一覧から外しますか？`)) return;
+      runAction(remove, async () => {
+        await send("DELETE", `/api/v1/inventory/possessions/${item.id}`);
+        await reload();
+        toast("一覧から外しました");
+        showList();
+      });
+    });
+    buttons.appendChild(remove);
+  }
+  form.appendChild(buttons);
+  showForm(isNew ? "所有物を追加" : "所有物を編集", form);
+}
+
+// ---------- 買い物リスト・ほしい物リスト ----------
+
+const LIST_INFO = {
+  shopping: { label: "買い物リスト", other: "wish", otherLabel: "ほしい物リスト" },
+  wish: { label: "ほしい物リスト", other: "shopping", otherLabel: "買い物リスト" },
+};
+
+function listRow(item, listType) {
+  const row = element("div", "row" + (item.is_done ? " done" : ""));
+  const check = element("button", "check" + (item.is_done ? " on" : ""), item.is_done ? "✓" : "");
+  check.addEventListener("click", () =>
+    runAction(check, async () => {
+      await send("PATCH", `/api/v1/inventory/lists/items/${item.id}`, { is_done: !item.is_done });
+      await reload();
+      toast(item.is_done ? "元に戻しました" : "買った物にしました");
+      showList(window.scrollY);
+    })
+  );
+  row.appendChild(check);
+
+  const body = element("div", "row-body");
+  const title = element("div", "row-title");
+  if (item.added_by === "ai" && !item.is_done) {
+    title.appendChild(element("span", "badge ai", "AI"));
+  }
+  title.appendChild(document.createTextNode(item.item_name));
+  body.appendChild(title);
+  if (item.notes) body.appendChild(element("div", "row-sub", item.notes));
+  body.addEventListener("click", () => showListItemForm(item, listType));
+  row.appendChild(body);
+  return row;
+}
+
+function renderListTab(listType) {
+  const info = LIST_INFO[listType];
+  const addBox = element("div", "add-box");
+  const input = textInput("");
+  input.placeholder = `${info.label}に追加`;
+  const add = element("button", "primary", "追加");
+  async function addItem() {
+    if (!input.value.trim()) return;
+    await runAction(add, async () => {
+      const result = await send("POST", `/api/v1/inventory/lists/${listType}`, {
+        item_name: input.value,
+      });
+      await reload();
+      toast(result.created ? "追加しました" : "すでにリストにあります");
+      showList(window.scrollY);
+    });
+  }
+  add.addEventListener("click", addItem);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.isComposing) addItem();
+  });
+  addBox.appendChild(input);
+  addBox.appendChild(add);
+  app.appendChild(addBox);
+
+  const items = data[listType];
+  const open = items.filter((item) => !item.is_done);
+  const done = items.filter((item) => item.is_done);
+
+  if (!open.length) {
+    app.appendChild(emptyText("まだ何もありません"));
+  } else {
+    const list = element("div", "list");
+    open.forEach((item) => list.appendChild(listRow(item, listType)));
+    app.appendChild(list);
+  }
+
+  if (done.length) {
+    app.appendChild(element("h2", null, "買った物（7日間表示）"));
+    const list = element("div", "list");
+    done.forEach((item) => list.appendChild(listRow(item, listType)));
+    app.appendChild(list);
+  }
+
+  app.appendChild(
+    element(
+      "p",
+      "muted",
+      "「AI」の印は、リトルクッキーが会話から入れた物です。チャットで「〇〇を買い物リストに入れて」と頼むこともできます。"
+    )
+  );
+}
+
+function showListItemForm(item, listType) {
+  const info = LIST_INFO[listType];
+  const form = element("div", "form");
+  const name = textInput(item.item_name);
+  const notes = textArea(item.notes);
+  form.appendChild(field("名前", name));
+  form.appendChild(field("メモ（理由・候補の型番など）", notes));
+
+  const buttons = element("div", "form-buttons");
+  const save = element("button", "primary", "保存");
+  save.addEventListener("click", () =>
+    runAction(save, async () => {
+      await send("PATCH", `/api/v1/inventory/lists/items/${item.id}`, {
+        item_name: name.value,
+        notes: notes.value,
+      });
+      await reload();
+      toast("保存しました");
+      showList();
+    })
+  );
+  buttons.appendChild(save);
+
+  const move = element("button", "secondary", `${info.otherLabel}へ移す`);
+  move.addEventListener("click", () =>
+    runAction(move, async () => {
+      await send("PATCH", `/api/v1/inventory/lists/items/${item.id}`, { list_type: info.other });
+      await reload();
+      toast(`${info.otherLabel}へ移しました`);
+      showList();
+    })
+  );
+  buttons.appendChild(move);
+
+  const remove = element("button", "danger", "消す");
+  remove.addEventListener("click", () => {
+    if (!confirm(`「${item.item_name}」をリストから消しますか？`)) return;
+    runAction(remove, async () => {
+      await send("DELETE", `/api/v1/inventory/lists/items/${item.id}`);
+      await reload();
+      toast("消しました");
+      showList();
+    });
+  });
+  buttons.appendChild(remove);
+  form.appendChild(buttons);
+
+  const meta = element(
+    "p",
+    "muted",
+    `${item.added_by === "ai" ? "リトルクッキーが追加" : "自分で追加"}・${formatDate(item.created_at.slice(0, 10))}`
+  );
+  form.appendChild(meta);
+  showForm(`${info.label}の項目`, form);
+}
+
+// ---------- 起動 ----------
+
+liff.init({ liffId: "2010907901-q0rIoeNw" })
+  .then(async () => {
+    // LINEの外（普通のブラウザ）で開いた場合はログインしてから表示する
+    if (!liff.isLoggedIn()) {
+      liff.login();
+      return;
+    }
+    try {
+      const saved = localStorage.getItem("inventoryTab");
+      if (TABS.some((tab) => tab.key === saved)) currentTab = saved;
+    } catch (error) {}
+    await reload();
+    showList(0);
+  })
+  .catch((error) => {
+    app.textContent = "読み込みに失敗しました: " + error.message;
+    app.className = "error";
+  });
+</script>
+</body>
+</html>
