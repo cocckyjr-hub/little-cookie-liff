@@ -50,6 +50,19 @@
     border-bottom: 1px solid #eee;
   }
   .row:last-child { border-bottom: none; }
+  /* 長押しで並べ替えるため、長押しで文字選択・メニューが出ないようにする */
+  .row[data-id] {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .row.lifting {
+    position: relative;
+    z-index: 5;
+    background: #f1fbf4;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+    transform: scale(1.02);
+  }
   .row-body { flex: 1; min-width: 0; cursor: pointer; }
   .row-title { font-size: 15px; font-weight: bold; word-break: break-all; }
   .row-sub { font-size: 12px; color: #888; margin-top: 2px; word-break: break-all; }
@@ -369,6 +382,130 @@ async function runAction(button, action) {
   }
 }
 
+// ---------- 長押しで並べ替え ----------
+//
+// 行を0.45秒押し続けると持ち上がり、そのまま指を上下に動かすと並びが変わる。
+// 指を離したら、その見出しの中の並び（idの順）をサーバーへ保存する。
+// 押してすぐ動かした場合は、ふつうのスクロールとして扱う。
+
+const LONG_PRESS_MS = 450;
+const MOVE_TOLERANCE_PX = 8;
+
+function makeSortable(listNode, kind) {
+  let timer = null;
+  let dragRow = null;
+  let startX = 0;
+  let startY = 0;
+  let suppressClick = false;
+
+  const sortableRows = () => [...listNode.children].filter((row) => row.dataset.id);
+
+  function cancelTimer() {
+    clearTimeout(timer);
+    timer = null;
+  }
+
+  function press(row, x, y) {
+    startX = x;
+    startY = y;
+    cancelTimer();
+    timer = setTimeout(() => {
+      timer = null;
+      dragRow = row;
+      row.classList.add("lifting");
+      if (navigator.vibrate) navigator.vibrate(20);
+    }, LONG_PRESS_MS);
+  }
+
+  function move(x, y) {
+    if (!dragRow) {
+      if (timer && Math.hypot(x - startX, y - startY) > MOVE_TOLERANCE_PX) cancelTimer();
+      return;
+    }
+    // 画面の端に近づいたら少しずつスクロールする
+    if (y < 90) window.scrollBy(0, -12);
+    else if (y > window.innerHeight - 60) window.scrollBy(0, 12);
+
+    const target = sortableRows().find((row) => {
+      if (row === dragRow) return false;
+      const box = row.getBoundingClientRect();
+      return y < box.top + box.height / 2;
+    });
+    if (target) {
+      if (target !== dragRow.nextSibling) listNode.insertBefore(dragRow, target);
+    } else {
+      const rows = sortableRows();
+      const last = rows[rows.length - 1];
+      if (last !== dragRow) last.after(dragRow);
+    }
+  }
+
+  async function release() {
+    cancelTimer();
+    if (!dragRow) return;
+    const row = dragRow;
+    dragRow = null;
+    row.classList.remove("lifting");
+    // 指を離した直後のタップで編集画面が開かないようにする
+    suppressClick = true;
+    setTimeout(() => (suppressClick = false), 400);
+
+    const ids = sortableRows().map((node) => Number(node.dataset.id));
+    try {
+      await send("POST", `/api/v1/inventory/${kind}/reorder`, { ids });
+      await reload();
+      toast("並びを保存しました");
+    } catch (error) {
+      alert(error.message);
+      await reload();
+      showList(window.scrollY);
+    }
+  }
+
+  function rowOf(event) {
+    // ＋／−やチェックのボタンを押した時は並べ替えを始めない
+    if (event.target.closest("button")) return null;
+    const row = event.target.closest(".row");
+    return row && row.parentNode === listNode && row.dataset.id ? row : null;
+  }
+
+  listNode.addEventListener("touchstart", (event) => {
+    const row = rowOf(event);
+    if (row) press(row, event.touches[0].clientX, event.touches[0].clientY);
+  }, { passive: true });
+  listNode.addEventListener("touchmove", (event) => {
+    if (dragRow) event.preventDefault(); // 並べ替え中は画面をスクロールさせない
+    move(event.touches[0].clientX, event.touches[0].clientY);
+  }, { passive: false });
+  listNode.addEventListener("touchend", release);
+  listNode.addEventListener("touchcancel", release);
+
+  // パソコンのマウスでも同じように使えるようにする
+  listNode.addEventListener("mousedown", (event) => {
+    const row = rowOf(event);
+    if (!row) return;
+    press(row, event.clientX, event.clientY);
+    const onMove = (moveEvent) => move(moveEvent.clientX, moveEvent.clientY);
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      release();
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  });
+
+  listNode.addEventListener("contextmenu", (event) => {
+    if (rowOf(event)) event.preventDefault();
+  });
+  listNode.addEventListener("click", (event) => {
+    if (suppressClick) {
+      event.stopPropagation();
+      event.preventDefault();
+    }
+  }, true);
+}
+
 // ---------- 在庫 ----------
 
 function stockSub(item) {
@@ -384,6 +521,7 @@ function stockSub(item) {
 
 function stockRow(item) {
   const row = element("div", "row");
+  row.dataset.id = item.id;
   const body = element("div", "row-body");
   const title = element("div", "row-title");
   if (item.is_amazon_subscription) title.appendChild(element("span", "badge amazon", "定期便"));
@@ -437,13 +575,18 @@ function stockSection(title, items) {
   }
   const list = element("div", "list");
   items.forEach((item) => list.appendChild(stockRow(item)));
+  makeSortable(list, "stock");
   section.appendChild(list);
   return section;
 }
 
 function renderStockTab() {
   app.appendChild(
-    element("div", "muted", "＋／−で在庫数を増減できます。名前をタップすると編集できます。")
+    element(
+      "div",
+      "muted",
+      "＋／−で在庫数を増減できます。名前をタップすると編集、長押しして動かすと並べ替えできます。"
+    )
   );
   const subscriptions = data.stock_items.filter((item) => item.is_amazon_subscription);
   const others = data.stock_items.filter((item) => !item.is_amazon_subscription);
@@ -559,12 +702,14 @@ function renderPossessionTab() {
   });
   const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b, "ja"));
   if (!keys.length) app.appendChild(emptyText("登録された所有物はありません"));
+  else app.appendChild(element("div", "muted", "タップで編集、長押しして動かすと並べ替えできます。"));
 
   keys.forEach((key) => {
     app.appendChild(element("h2", null, `${key}（${groups[key].length}）`));
     const list = element("div", "list");
     groups[key].forEach((item) => {
       const row = element("div", "row");
+      row.dataset.id = item.id;
       const body = element("div", "row-body");
       const title = element("div", "row-title");
       if (item.status === "broken") title.appendChild(element("span", "badge warn", "故障"));
@@ -577,6 +722,7 @@ function renderPossessionTab() {
       row.appendChild(element("span", "muted", "›"));
       list.appendChild(row);
     });
+    makeSortable(list, "possessions");
     app.appendChild(list);
   });
 
@@ -667,6 +813,7 @@ const LIST_INFO = {
 
 function listRow(item, listType) {
   const row = element("div", "row" + (item.is_done ? " done" : ""));
+  if (!item.is_done) row.dataset.id = item.id;
   const check = element("button", "check" + (item.is_done ? " on" : ""), item.is_done ? "✓" : "");
   check.addEventListener("click", () =>
     runAction(check, async () => {
@@ -725,6 +872,7 @@ function renderListTab(listType) {
   } else {
     const list = element("div", "list");
     open.forEach((item) => list.appendChild(listRow(item, listType)));
+    makeSortable(list, "lists");
     app.appendChild(list);
   }
 
@@ -739,7 +887,7 @@ function renderListTab(listType) {
     element(
       "p",
       "muted",
-      "「AI」の印は、リトルクッキーが会話から入れた物です。チャットで「〇〇を買い物リストに入れて」と頼むこともできます。"
+      "長押しして動かすと並べ替えできます。「AI」の印は、リトルクッキーが会話から入れた物です。チャットで「〇〇を買い物リストに入れて」と頼むこともできます。"
     )
   );
 }
