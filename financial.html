@@ -871,11 +871,12 @@ const CYCLE_LABELS = { monthly: "月ごと", yearly: "年ごと", unknown: "不�
 
 function subscriptionSummary(item) {
   const parts = [];
-  if (item.amount !== null && item.amount !== undefined) {
-    parts.push(item.billing_cycle === "yearly" ? `年${yen(item.amount)}` : `月${yen(item.amount)}`);
-  } else {
-    parts.push("金額未登録");
-  }
+  const hasAmount = item.amount !== null && item.amount !== undefined;
+  if (hasAmount && item.billing_cycle === "monthly") parts.push(`月${yen(item.amount)}`);
+  else if (hasAmount && item.billing_cycle === "yearly") parts.push(`年${yen(item.amount)}`);
+  // 周期が分からないと月あたりに直せないため、合計に入らないことを知らせる（2026-11-21）
+  else if (hasAmount) parts.push(`${yen(item.amount)}（周期が不明なので合計に入っていません）`);
+  else parts.push("金額未登録（合計に入っていません）");
   if (item.billing_cycle === "monthly" && item.renewal_day) parts.push(`毎月${item.renewal_day}日`);
   else if (item.renewal_month && item.renewal_day) parts.push(`更新 ${item.renewal_month}/${item.renewal_day}`);
   else if (item.renewal_day) parts.push(`毎月${item.renewal_day}日`);
@@ -890,7 +891,9 @@ function renderSubsTab() {
   total.appendChild(big);
   total.appendChild(element("div", "muted", `年あたり${yen(subsData.yearly_total)}（年払いは12で割って計算）`));
   if (subsData.unknown_amount_count) {
-    total.appendChild(element("div", "muted", `金額が未登録のサブスクが${subsData.unknown_amount_count}件あり、合計に入っていません`));
+    total.appendChild(
+      element("div", "muted", `金額か支払いの周期が未登録のサブスクが${subsData.unknown_amount_count}件あり、合計に入っていません（タップして登録できます）`)
+    );
   }
   app.appendChild(total);
 
@@ -908,10 +911,13 @@ function renderSubsTab() {
 function showSubscriptionForm(item) {
   const isNew = item === null;
   const value = item || { billing_cycle: "monthly" };
+  // 周期が「不明」のままだと合計に入らないため、編集画面では「月ごと」を選んだ状態で
+  // 開く（多くのサブスクは月払い。違えばここで年ごとに変えてから保存する。2026-11-21）
+  const initialCycle = value.billing_cycle === "unknown" ? "monthly" : value.billing_cycle;
   const box = element("div", "card");
   box.appendChild(element("div", "name", isNew ? "サブスクを追加" : "サブスクを編集"));
   const name = textInput(value.service_name);
-  const cycle = selectInput(CYCLE_LABELS, value.billing_cycle);
+  const cycle = selectInput(CYCLE_LABELS, initialCycle);
   const amount = textInput(value.amount, "number");
   const month = textInput(value.renewal_month, "number");
   const day = textInput(value.renewal_day, "number");
