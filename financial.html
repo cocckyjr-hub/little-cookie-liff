@@ -90,11 +90,46 @@
   .row-sub.not-achieved { color: #cc8400; font-weight: bold; }
   .chevron { color: #bbb; font-size: 20px; }
   .back-button { margin-bottom: 12px; background: white; }
+  /* タブ（2026-11-21追加） */
+  header { position: sticky; top: 0; z-index: 10; background: #f5f5f5; padding: 4px 0 0; }
+  .tabs { display: flex; gap: 6px; padding-bottom: 10px; }
+  .tab {
+    flex: 1; border-radius: 18px; padding: 8px 0; font-size: 13px;
+    background: #e4e4e4; color: #555;
+  }
+  .tab.active { background: #06c755; color: white; }
+  button.primary { background: #06c755; color: white; }
+  button.danger { background: white; color: #cc3300; border: 1px solid #cc3300; }
+  button.small-danger { background: white; color: #cc3300; border: 1px solid #cc3300; padding: 6px 12px; font-size: 12px; }
+  button.wide { width: 100%; margin-top: 4px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; color: #777; margin-bottom: 4px; }
+  input, select, textarea {
+    font-size: 16px; padding: 9px 10px; border: 1px solid #ccc; border-radius: 8px;
+    background: white; box-sizing: border-box; width: 100%; font-family: inherit;
+  }
+  textarea { min-height: 60px; }
+  .big-number { display: flex; align-items: baseline; justify-content: space-between; margin: 8px 0; }
+  .big-label { font-size: 13px; color: #666; }
+  .big-value { font-size: 26px; font-weight: bold; color: #06c755; }
+  .big-value.over { color: #cc3300; }
+  .year-block { margin-top: 12px; }
+  .year-summary { font-size: 14px; font-weight: bold; color: #444; margin: 0 0 8px; }
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8); color: white; padding: 8px 16px; border-radius: 18px;
+    font-size: 13px; opacity: 0; transition: opacity 0.2s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
 </style>
 </head>
 <body>
-<h1>フィナンシャルサポート</h1>
+<header>
+  <h1>フィナンシャルサポート</h1>
+  <div class="tabs" id="tabs"></div>
+</header>
 <div id="app">読み込み中…</div>
+<div class="toast" id="toast"></div>
 
 <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
@@ -418,8 +453,7 @@ function listSection(title, items, toRow, emptyText) {
   return fragment;
 }
 
-function showList() {
-  app.textContent = "";
+function renderPaymentTab() {
   app.appendChild(
     listSection("お得の達成状況", overview.programs, (program) =>
       listRow(program.name, programSummary(program), null, () =>
@@ -453,7 +487,453 @@ function showList() {
         showDetail(renderPayee(payee))
       ), "登録された支払い先はありません")
   );
+}
+
+// ---------- タブ（2026-11-21追加: 支払い・収入・サブスク） ----------
+
+const TABS = [
+  { key: "pay", label: "支払い" },
+  { key: "income", label: "収入" },
+  { key: "subs", label: "サブスク" },
+];
+let currentTab = "pay";
+let incomeData = null;
+let subsData = null;
+let pollTimer = null;
+
+function renderTabs() {
+  const tabsNode = document.getElementById("tabs");
+  tabsNode.textContent = "";
+  TABS.forEach((tab) => {
+    const button = element("button", "tab" + (tab.key === currentTab ? " active" : ""), tab.label);
+    button.addEventListener("click", async () => {
+      currentTab = tab.key;
+      try { localStorage.setItem("financialTab", currentTab); } catch (error) {}
+      listScrollY = 0;
+      await showList();
+    });
+    tabsNode.appendChild(button);
+  });
+}
+
+async function showList() {
+  renderTabs();
+  app.textContent = "読み込み中…";
+  try {
+    if (currentTab === "pay") {
+      if (!overview) overview = await callApi("/api/v1/financial/overview");
+      app.textContent = "";
+      renderPaymentTab();
+    } else if (currentTab === "income") {
+      if (!incomeData) incomeData = await callApi("/api/v1/financial/income");
+      app.textContent = "";
+      renderIncomeTab();
+    } else {
+      if (!subsData) subsData = await callApi("/api/v1/financial/subscriptions");
+      app.textContent = "";
+      renderSubsTab();
+    }
+  } catch (error) {
+    app.textContent = "読み込みに失敗しました: " + error.message;
+    return;
+  }
   window.scrollTo(0, listScrollY);
+}
+
+function yen(value) {
+  if (value === null || value === undefined) return "–";
+  return `${Math.round(value).toLocaleString("ja-JP")}円`;
+}
+
+function send(method, path, body) {
+  return callApi(path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+}
+
+let toastTimer = null;
+function toast(message) {
+  const node = document.getElementById("toast");
+  node.textContent = message;
+  node.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => node.classList.remove("show"), 1800);
+}
+
+function field(label, input) {
+  const wrapper = element("div", "field");
+  wrapper.appendChild(element("label", null, label));
+  wrapper.appendChild(input);
+  return wrapper;
+}
+
+function textInput(value, type = "text") {
+  const input = element("input");
+  input.type = type;
+  input.value = value === null || value === undefined ? "" : value;
+  return input;
+}
+
+function selectInput(options, value) {
+  const select = element("select");
+  Object.entries(options).forEach(([key, label]) => {
+    const option = element("option", null, label);
+    option.value = key;
+    select.appendChild(option);
+  });
+  select.value = value;
+  return select;
+}
+
+async function runAction(button, action) {
+  button.disabled = true;
+  try {
+    await action();
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+// ---------- 収入タブ ----------
+
+const RECORD_LABELS = { salary: "給与", bonus: "賞与", withholding: "源泉徴収票" };
+
+function monthLabel(payMonth) {
+  return `${Number(payMonth.slice(5, 7))}月`;
+}
+
+function importStatusText(status) {
+  if (status.running) {
+    return status.total
+      ? `読み取り中… ${status.done}/${status.total}件`
+      : status.message || "ドライブを確認しています";
+  }
+  return status.message || "";
+}
+
+function renderImportBox() {
+  const box = element("div", "card");
+  const row = element("div", "title-row");
+  row.appendChild(element("div", "name", "給与の資料"));
+  const button = element("button", "primary", "更新");
+  row.appendChild(button);
+  box.appendChild(row);
+  box.appendChild(
+    element("div", "muted", "Googleドライブ「80_AI/お金」の給与・賞与・源泉徴収票のPDFのうち、まだ読んでいない物を読み込みます。")
+  );
+  const status = element("div", "status", importStatusText(incomeData.import_status));
+  box.appendChild(status);
+
+  async function poll() {
+    clearTimeout(pollTimer);
+    try {
+      const latest = await callApi("/api/v1/financial/income/status");
+      status.textContent = importStatusText(latest);
+      if (latest.running) {
+        button.disabled = true;
+        pollTimer = setTimeout(poll, 3000);
+        return;
+      }
+      button.disabled = false;
+      incomeData = await callApi("/api/v1/financial/income");
+      incomeData.import_status = latest;
+      if (currentTab === "income") {
+        listScrollY = window.scrollY;
+        await showList();
+        toast(latest.message || "読み込みが終わりました");
+      }
+    } catch (error) {
+      status.textContent = "進み具合を確認できませんでした: " + error.message;
+      button.disabled = false;
+    }
+  }
+
+  button.addEventListener("click", () =>
+    runAction(button, async () => {
+      const result = await send("POST", "/api/v1/financial/income/refresh");
+      status.textContent = importStatusText(result);
+      pollTimer = setTimeout(poll, 2000);
+    })
+  );
+  if (incomeData.import_status.running) {
+    button.disabled = true;
+    pollTimer = setTimeout(poll, 3000);
+  }
+  return box;
+}
+
+function furusatoCard(furusato) {
+  const box = element("div", "card");
+  box.appendChild(element("div", "name", `${furusato.year}年のふるさと納税`));
+
+  if (!furusato.has_income) {
+    box.appendChild(element("div", "muted", "給与の資料がまだ無いため計算できません。上の「更新」で読み込んでください。"));
+    return box;
+  }
+
+  const big = element("div", "big-number");
+  big.appendChild(element("span", "big-label", "あと使える目安"));
+  big.appendChild(element("span", "big-value" + (furusato.remaining < 0 ? " over" : ""), yen(furusato.remaining)));
+  box.appendChild(big);
+
+  box.appendChild(
+    labeledList("内訳", [
+      `上限（予測）: ${yen(furusato.limit)}`,
+      `寄付済み: ${yen(furusato.donated)}（${furusato.donations.length}件）`,
+      `余裕を持たせるなら（上限の9割）: あと${yen(furusato.safe_remaining)}`,
+    ])
+  );
+  if (furusato.last_year_actual_limit) {
+    box.appendChild(
+      element("div", "muted", `参考: 去年は源泉徴収票からの計算で上限${yen(furusato.last_year_actual_limit)}でした`)
+    );
+  }
+
+  const estimate = furusato.estimate;
+  const details = document.createElement("details");
+  details.appendChild(element("summary", null, "計算のしかたを見る"));
+  [
+    `年収の見込み: ${yen(estimate.gross_pay)}（届いた分${yen(furusato.actual_gross)}・${furusato.actual_count}件＋見込み${yen(furusato.forecast_gross)}）`,
+    ...furusato.forecasts.map((item) => `見込み: ${item.month}月の${item.kind} ${yen(item.gross_pay)}`),
+    `給与所得: ${yen(estimate.employment_income)}`,
+    `社会保険料: ${yen(estimate.social_insurance)}`,
+    `生命保険料控除: 所得税${yen(estimate.life_insurance_income_tax)}・住民税${yen(estimate.life_insurance_resident_tax)}`,
+    `基礎控除: 所得税${yen(estimate.basic_deduction_income_tax)}・住民税${yen(estimate.basic_deduction_resident_tax)}`,
+    `所得税の課税所得: ${yen(estimate.income_tax_taxable)}（税率${estimate.income_tax_rate_percent}%）`,
+    `住民税の所得割: ${yen(estimate.resident_income_levy)}`,
+    ...furusato.notes,
+  ].forEach((line) => details.appendChild(element("div", "rule", line)));
+  box.appendChild(details);
+  return box;
+}
+
+function donationSection(furusato) {
+  const fragment = document.createDocumentFragment();
+  fragment.appendChild(element("h2", null, `${furusato.year}年の寄付（${furusato.donations.length}）`));
+
+  const form = element("div", "card");
+  const today = new Date();
+  const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const dateInput = textInput(iso, "date");
+  const cityInput = textInput("");
+  cityInput.placeholder = "例: 北海道紋別市";
+  const amountInput = textInput("", "number");
+  amountInput.placeholder = "例: 10000";
+  form.appendChild(field("寄付した日", dateInput));
+  form.appendChild(field("自治体", cityInput));
+  form.appendChild(field("金額（円）", amountInput));
+  const add = element("button", "primary wide", "寄付を記録");
+  add.addEventListener("click", () =>
+    runAction(add, async () => {
+      await send("POST", "/api/v1/financial/furusato/donations", {
+        donation_date: dateInput.value,
+        municipality: cityInput.value,
+        amount: Number(amountInput.value),
+      });
+      incomeData = null;
+      listScrollY = window.scrollY;
+      await showList();
+      toast("記録しました");
+    })
+  );
+  form.appendChild(add);
+  fragment.appendChild(form);
+
+  if (furusato.donations.length) {
+    const list = element("div", "list");
+    furusato.donations.forEach((donation) => {
+      const row = element("div", "row");
+      const body = element("div", "row-body");
+      body.appendChild(element("div", "row-title", `${donation.municipality}　${yen(donation.amount)}`));
+      body.appendChild(element("div", "row-sub", donation.donation_date));
+      row.appendChild(body);
+      const remove = element("button", "small-danger", "消す");
+      remove.addEventListener("click", () => {
+        if (!confirm(`${donation.municipality}（${yen(donation.amount)}）の記録を消しますか？`)) return;
+        runAction(remove, async () => {
+          await send("DELETE", `/api/v1/financial/furusato/donations/${donation.id}`);
+          incomeData = null;
+          listScrollY = window.scrollY;
+          await showList();
+          toast("消しました");
+        });
+      });
+      row.appendChild(remove);
+      list.appendChild(row);
+    });
+    fragment.appendChild(list);
+  }
+  return fragment;
+}
+
+function renderIncomeRecord(record) {
+  const box = element("div", "card");
+  box.appendChild(
+    element("div", "name", `${record.pay_month.slice(0, 4)}年${monthLabel(record.pay_month)}支給の${RECORD_LABELS[record.record_type]}`)
+  );
+  if (record.needs_review) {
+    box.appendChild(labeledList("確認してほしい点", [record.review_note], "caution"));
+  }
+  if (record.record_type === "withholding") {
+    const d = record.details;
+    box.appendChild(
+      labeledList("源泉徴収票", [
+        `支払金額: ${yen(d.payment_amount)}`,
+        `給与所得控除後: ${yen(d.employment_income)}`,
+        `所得控除の合計: ${yen(d.total_deductions)}`,
+        `源泉徴収税額: ${yen(d.withholding_tax)}`,
+        `社会保険料: ${yen(d.social_insurance)}`,
+        `生命保険料控除: ${yen(d.life_insurance_deduction)}`,
+        `基礎控除: ${yen(d.basic_deduction)}`,
+      ])
+    );
+  } else {
+    box.appendChild(
+      labeledList("まとめ", [
+        `総支給額: ${yen(record.gross_pay)}`,
+        `社会保険料: ${yen(record.social_insurance)}`,
+        `所得税: ${yen(record.income_tax)}・住民税: ${yen(record.resident_tax)}`,
+        `差引支給額（手取り）: ${yen(record.net_pay)}`,
+      ])
+    );
+    const payments = record.details.payments || [];
+    const deductions = record.details.deductions || [];
+    if (payments.length) box.appendChild(labeledList("支給", payments.map((i) => `${i.name}: ${yen(i.amount)}`)));
+    if (deductions.length) box.appendChild(labeledList("控除", deductions.map((i) => `${i.name}: ${yen(i.amount)}`)));
+  }
+  box.appendChild(element("div", "muted", `読み取ったファイル: ${record.file_name}`));
+  return box;
+}
+
+function renderIncomeTab() {
+  app.appendChild(furusatoCard(incomeData.furusato));
+  app.appendChild(donationSection(incomeData.furusato));
+  app.appendChild(element("h2", null, "収入の記録"));
+  app.appendChild(renderImportBox());
+
+  if (!incomeData.years.length) {
+    app.appendChild(element("div", "card muted", "まだ記録がありません。「更新」でドライブの資料を読み込んでください。"));
+    return;
+  }
+
+  incomeData.years.forEach((year) => {
+    const details = document.createElement("details");
+    details.className = "year-block";
+    if (year.year === incomeData.furusato.year) details.open = true;
+    details.appendChild(
+      element("summary", "year-summary", `${year.year}年　総支給${yen(year.gross_total)}・手取り${yen(year.net_total)}`)
+    );
+    const list = element("div", "list");
+    const rows = year.withholding ? [...year.records, year.withholding] : year.records;
+    rows.forEach((record) => {
+      const isSlip = record.record_type === "withholding";
+      const summary = isSlip
+        ? { text: `支払金額${yen(record.gross_pay)}・源泉徴収税額${yen(record.income_tax)}` }
+        : { text: `総支給${yen(record.gross_pay)}・手取り${yen(record.net_pay)}` };
+      const badge = record.needs_review ? element("span", "badge cancellation_candidate", "要確認") : null;
+      const title = isSlip ? "源泉徴収票" : `${monthLabel(record.pay_month)} ${RECORD_LABELS[record.record_type]}`;
+      list.appendChild(listRow(title, summary, badge, () => showDetail(renderIncomeRecord(record))));
+    });
+    details.appendChild(list);
+    app.appendChild(details);
+  });
+}
+
+// ---------- サブスクタブ ----------
+
+const CYCLE_LABELS = { monthly: "月ごと", yearly: "年ごと", unknown: "不明" };
+
+function subscriptionSummary(item) {
+  const parts = [];
+  if (item.amount !== null && item.amount !== undefined) {
+    parts.push(item.billing_cycle === "yearly" ? `年${yen(item.amount)}` : `月${yen(item.amount)}`);
+  } else {
+    parts.push("金額未登録");
+  }
+  if (item.billing_cycle === "monthly" && item.renewal_day) parts.push(`毎月${item.renewal_day}日`);
+  else if (item.renewal_month && item.renewal_day) parts.push(`更新 ${item.renewal_month}/${item.renewal_day}`);
+  else if (item.renewal_day) parts.push(`毎月${item.renewal_day}日`);
+  return { text: parts.join("・") };
+}
+
+function renderSubsTab() {
+  const total = element("div", "card");
+  const big = element("div", "big-number");
+  big.appendChild(element("span", "big-label", "月あたりの合計"));
+  big.appendChild(element("span", "big-value", yen(subsData.monthly_total)));
+  total.appendChild(big);
+  total.appendChild(element("div", "muted", `年あたり${yen(subsData.yearly_total)}（年払いは12で割って計算）`));
+  if (subsData.unknown_amount_count) {
+    total.appendChild(element("div", "muted", `金額が未登録のサブスクが${subsData.unknown_amount_count}件あり、合計に入っていません`));
+  }
+  app.appendChild(total);
+
+  app.appendChild(
+    listSection("サブスク", subsData.subscriptions, (item) =>
+      listRow(item.service_name, subscriptionSummary(item), null, () => showSubscriptionForm(item)),
+      "登録されたサブスクはありません")
+  );
+  const add = element("button", "primary wide", "＋ サブスクを追加");
+  add.style.marginTop = "12px";
+  add.addEventListener("click", () => showSubscriptionForm(null));
+  app.appendChild(add);
+}
+
+function showSubscriptionForm(item) {
+  const isNew = item === null;
+  const value = item || { billing_cycle: "monthly" };
+  const box = element("div", "card");
+  box.appendChild(element("div", "name", isNew ? "サブスクを追加" : "サブスクを編集"));
+  const name = textInput(value.service_name);
+  const cycle = selectInput(CYCLE_LABELS, value.billing_cycle);
+  const amount = textInput(value.amount, "number");
+  const month = textInput(value.renewal_month, "number");
+  const day = textInput(value.renewal_day, "number");
+  const notes = element("textarea");
+  notes.value = value.notes || "";
+  box.appendChild(field("サービス名", name));
+  box.appendChild(field("支払いの周期", cycle));
+  box.appendChild(field("金額（円・1回分）", amount));
+  box.appendChild(field("更新月（年払いの場合）", month));
+  box.appendChild(field("更新日", day));
+  box.appendChild(field("メモ", notes));
+
+  const numberOrNull = (input) => (input.value.trim() === "" ? null : Number(input.value));
+  const buttons = element("div", "buttons");
+  const save = element("button", "primary", isNew ? "追加" : "保存");
+  save.addEventListener("click", () =>
+    runAction(save, async () => {
+      const body = {
+        service_name: name.value,
+        billing_cycle: cycle.value,
+        amount: numberOrNull(amount),
+        renewal_month: numberOrNull(month),
+        renewal_day: numberOrNull(day),
+        notes: notes.value.trim() || null,
+      };
+      if (isNew) await send("POST", "/api/v1/financial/subscriptions", body);
+      else await send("PATCH", `/api/v1/financial/subscriptions/${item.id}`, body);
+      subsData = null;
+      await showList();
+      toast(isNew ? "追加しました" : "保存しました");
+    })
+  );
+  buttons.appendChild(save);
+  if (!isNew) {
+    const remove = element("button", "danger", "解約した");
+    remove.addEventListener("click", () => {
+      if (!confirm(`「${item.service_name}」を解約済みとして一覧から外しますか？`)) return;
+      runAction(remove, async () => {
+        await send("DELETE", `/api/v1/financial/subscriptions/${item.id}`);
+        subsData = null;
+        await showList();
+        toast("一覧から外しました");
+      });
+    });
+    buttons.appendChild(remove);
+  }
+  box.appendChild(buttons);
+  showDetail(box);
 }
 
 // ---------- 詳細ページ ----------
@@ -469,8 +949,11 @@ function showDetail(detailNode) {
 }
 
 async function renderOverview() {
-  overview = await callApi("/api/v1/financial/overview");
-  showList();
+  try {
+    const saved = localStorage.getItem("financialTab");
+    if (TABS.some((tab) => tab.key === saved)) currentTab = saved;
+  } catch (error) {}
+  await showList();
 }
 
 liff.init({ liffId: "2010907901-q0rIoeNw" })
