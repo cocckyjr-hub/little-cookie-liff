@@ -153,10 +153,15 @@ async function callApi(path, options) {
     headers: {
       ...(options && options.headers),
       "ngrok-skip-browser-warning": "true",
+      // 本人確認のため、LINEのアクセストークンを付ける（2026-11-21〜）
+      Authorization: `Bearer ${liff.getAccessToken()}`,
     },
   };
 
   const response = await fetch(API_BASE + path, mergedOptions);
+  if (response.status === 401) {
+    throw new Error("本人確認ができませんでした。LINEから開き直してください。");
+  }
   if (!response.ok) {
     throw new Error("request failed");
   }
@@ -851,6 +856,12 @@ async function setAlarmTime() {
 
 liff.init({ liffId: "2010907901-q0rIoeNw" })
   .then(() => {
+    // LINEの外（普通のブラウザ）で開いた場合はログインしてから表示する
+    // （APIの本人確認にLINEのアクセストークンが要るため、2026-11-21〜）
+    if (!liff.isLoggedIn()) {
+      liff.login();
+      return;
+    }
     const params = new URLSearchParams(location.search);
     const currentDevice = params.get("device");
 
