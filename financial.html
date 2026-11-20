@@ -114,6 +114,10 @@
   .big-value { font-size: 26px; font-weight: bold; color: #06c755; }
   .big-value.over { color: #cc3300; }
   .year-block { margin-top: 12px; }
+  .inline-form { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+  .inline-form input { flex: 1; }
+  .inline-label { font-size: 12px; color: #666; white-space: nowrap; }
+  button.secondary { background: #e0e0e0; color: #333; }
   .year-summary { font-size: 14px; font-weight: bold; color: #444; margin: 0 0 8px; }
   .toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
@@ -697,6 +701,7 @@ function furusatoCard(furusato) {
     ...furusato.forecasts.map((item) => `見込み: ${item.month}月の${item.kind} ${yen(item.gross_pay)}`),
     `給与所得: ${yen(estimate.employment_income)}`,
     `社会保険料: ${yen(estimate.social_insurance)}`,
+    `iDeCo（小規模企業共済等掛金控除）: ${yen(estimate.mutual_aid)}`,
     `生命保険料控除: 所得税${yen(estimate.life_insurance_income_tax)}・住民税${yen(estimate.life_insurance_resident_tax)}`,
     `基礎控除: 所得税${yen(estimate.basic_deduction_income_tax)}・住民税${yen(estimate.basic_deduction_resident_tax)}`,
     `所得税の課税所得: ${yen(estimate.income_tax_taxable)}（税率${estimate.income_tax_rate_percent}%）`,
@@ -704,6 +709,27 @@ function furusatoCard(furusato) {
     ...furusato.notes,
   ].forEach((line) => details.appendChild(element("div", "rule", line)));
   box.appendChild(details);
+
+  // iDeCoの掛金（計算に使う。変えるとすぐ計算し直す）
+  const idecoRow = element("div", "inline-form");
+  const idecoInput = textInput(furusato.ideco_monthly || "", "number");
+  idecoInput.placeholder = "0";
+  const idecoSave = element("button", "secondary", "保存");
+  idecoRow.appendChild(element("span", "inline-label", "iDeCo 月額（円）"));
+  idecoRow.appendChild(idecoInput);
+  idecoRow.appendChild(idecoSave);
+  idecoSave.addEventListener("click", () =>
+    runAction(idecoSave, async () => {
+      await send("POST", "/api/v1/financial/income/settings", {
+        ideco_monthly: Number(idecoInput.value || 0),
+      });
+      incomeData = null;
+      listScrollY = window.scrollY;
+      await showList();
+      toast("iDeCoの掛金を保存して計算し直しました");
+    })
+  );
+  box.appendChild(idecoRow);
   return box;
 }
 
