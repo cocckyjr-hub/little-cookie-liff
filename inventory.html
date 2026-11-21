@@ -580,6 +580,40 @@ function stockSection(title, items) {
   return section;
 }
 
+// 分類ごとにまとめる（分類は五十音順、未分類はいちばん最後。2026-11-21〜。
+// それまでは「Amazon定期便」「そのほか」の2つに分けていた。定期便は行の印で分かる）
+function groupByCategory(items, labelOf) {
+  const groups = {};
+  items.forEach((item) => {
+    const key = labelOf(item.category);
+    (groups[key] = groups[key] || []).push(item);
+  });
+  const keys = Object.keys(groups)
+    .filter((key) => key !== "未分類")
+    .sort((a, b) => a.localeCompare(b, "ja"));
+  if (groups["未分類"]) keys.push("未分類");
+  return keys.map((key) => [key, groups[key]]);
+}
+
+// 入力欄の候補（datalist）として、登録済みの分類を出す
+function categoryInput(value, categories, id) {
+  const input = textInput(value);
+  const list = element("datalist");
+  list.id = id;
+  [...new Set(categories.filter((category) => category))]
+    .sort((a, b) => a.localeCompare(b, "ja"))
+    .forEach((category) => {
+      const option = element("option");
+      option.value = category;
+      list.appendChild(option);
+    });
+  input.setAttribute("list", id);
+  const wrapper = element("div");
+  wrapper.appendChild(input);
+  wrapper.appendChild(list);
+  return { wrapper, input };
+}
+
 function renderStockTab() {
   app.appendChild(
     element(
@@ -588,10 +622,9 @@ function renderStockTab() {
       "＋／−で在庫数を増減できます。名前をタップすると編集、長押しして動かすと並べ替えできます。"
     )
   );
-  const subscriptions = data.stock_items.filter((item) => item.is_amazon_subscription);
-  const others = data.stock_items.filter((item) => !item.is_amazon_subscription);
-  app.appendChild(stockSection("Amazon定期便", subscriptions));
-  app.appendChild(stockSection("そのほかの在庫", others));
+  groupByCategory(data.stock_items, (category) => category || "未分類").forEach(
+    ([category, items]) => app.appendChild(stockSection(category, items))
+  );
 
   const add = element("button", "primary add-wide", "＋ 品目を追加");
   add.addEventListener("click", () => showStockForm(null));
@@ -611,12 +644,18 @@ function showStockForm(item) {
     value.purchase_type
   );
   const amazon = checkboxField("Amazon定期おトク便で届く", Boolean(value.is_amazon_subscription));
+  const category = categoryInput(
+    value.category || "",
+    data.stock_items.map((stockItem) => stockItem.category),
+    "stock-categories"
+  );
   const cycle = textInput(value.cycle_months, "number");
   const next = textInput(value.next_purchase_date, "date");
   const count = textInput(value.stock_count, "number");
   const notes = textArea(value.notes);
 
   form.appendChild(field("名前", name));
+  form.appendChild(field("分類（例: 洗濯・ヘアケア・食品）", category.wrapper));
   form.appendChild(field("買い方", type));
   form.appendChild(amazon.wrapper);
   form.appendChild(field("周期（何か月ごと）", cycle));
@@ -637,6 +676,7 @@ function showStockForm(item) {
         stock_count: numberOrNull(count),
         notes: textOrNull(notes),
         is_amazon_subscription: isAmazon,
+        category: textOrNull(category.input),
       };
       if (isNew) await send("POST", "/api/v1/inventory/stock", body);
       else await send("PATCH", `/api/v1/inventory/stock/${item.id}`, body);
@@ -695,19 +735,14 @@ function possessionSub(item) {
 }
 
 function renderPossessionTab() {
-  const groups = {};
-  data.possessions.forEach((item) => {
-    const key = categoryLabel(item.category);
-    (groups[key] = groups[key] || []).push(item);
-  });
-  const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b, "ja"));
-  if (!keys.length) app.appendChild(emptyText("登録された所有物はありません"));
+  const grouped = groupByCategory(data.possessions, categoryLabel);
+  if (!grouped.length) app.appendChild(emptyText("登録された所有物はありません"));
   else app.appendChild(element("div", "muted", "タップで編集、長押しして動かすと並べ替えできます。"));
 
-  keys.forEach((key) => {
-    app.appendChild(element("h2", null, `${key}（${groups[key].length}）`));
+  grouped.forEach(([key, items]) => {
+    app.appendChild(element("h2", null, `${key}（${items.length}）`));
     const list = element("div", "list");
-    groups[key].forEach((item) => {
+    items.forEach((item) => {
       const row = element("div", "row");
       row.dataset.id = item.id;
       const body = element("div", "row-body");
@@ -737,7 +772,11 @@ function showPossessionForm(item) {
   const form = element("div", "form");
   const inputs = {
     item_name: textInput(value.item_name),
-    category: textInput(value.category ? categoryLabel(value.category) : ""),
+    category: categoryInput(
+      value.category ? categoryLabel(value.category) : "",
+      data.possessions.map((possession) => (possession.category ? categoryLabel(possession.category) : null)),
+      "possession-categories"
+    ),
     manufacturer: textInput(value.manufacturer),
     model_number: textInput(value.model_number),
     purchase_date: textInput(value.purchase_date, "date"),
@@ -748,7 +787,7 @@ function showPossessionForm(item) {
     notes: textArea(value.notes),
   };
   form.appendChild(field("名前", inputs.item_name));
-  form.appendChild(field("分類（例: ガジェット・家電・家具）", inputs.category));
+  form.appendChild(field("分類（例: ガジェット・家電・家具）", inputs.category.wrapper));
   form.appendChild(field("メーカー", inputs.manufacturer));
   form.appendChild(field("型番", inputs.model_number));
   form.appendChild(field("購入日", inputs.purchase_date));
@@ -762,7 +801,7 @@ function showPossessionForm(item) {
   const save = element("button", "primary", isNew ? "追加" : "保存");
   save.addEventListener("click", () =>
     runAction(save, async () => {
-      const categoryText = textOrNull(inputs.category);
+      const categoryText = textOrNull(inputs.category.input);
       // 英語の分類を表示名のまま保存し直さないよう、変えていなければ元の値を使う
       const category =
         item && categoryText === categoryLabel(item.category) ? item.category : categoryText;
