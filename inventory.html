@@ -128,8 +128,8 @@
     font-family: inherit;
   }
   textarea { min-height: 70px; }
-  .category-other { margin-top: 6px; }
-  .category-other[hidden] { display: none; }
+  .choice-other { margin-top: 6px; }
+  .choice-other[hidden] { display: none; }
   button.primary, button.secondary, button.danger {
     border: none;
     border-radius: 8px;
@@ -518,6 +518,7 @@ function stockSub(item) {
   } else if (item.purchase_type === "periodic" && item.next_purchase_date) {
     parts.push(`次の購入 ${formatDate(item.next_purchase_date)}`);
   }
+  if (item.storage_location) parts.push(item.storage_location);
   return parts.join("・");
 }
 
@@ -597,13 +598,13 @@ function groupByCategory(items, labelOf) {
   return keys.map((key) => [key, groups[key]]);
 }
 
-// 分類の欄: 登録済みの分類をプルダウンで選び、無ければ「それ以外（手入力）」を
-// 選んで新しい分類を打ち込む（2026-11-22〜。それまでは入力欄＋候補表示だった）。
-// 戻り値のinput.valueは、選んだ分類か打ち込んだ分類（未分類なら空）になる
-const OTHER_CATEGORY = "__other__";
+// 分類・置き場所の欄: 登録済みの値をプルダウンで選び、無ければ「それ以外（手入力）」を
+// 選んで新しい値を打ち込む（2026-11-22〜。それまでは入力欄＋候補表示だった）。
+// 戻り値のinput.valueは、選んだ値か打ち込んだ値（指定なしなら空）になる
+const OTHER_CHOICE = "__other__";
 
-function categoryInput(value, categories) {
-  const choices = [...new Set(categories.filter((category) => category))].sort((a, b) =>
+function choiceInput(value, registered, emptyLabel, otherPlaceholder) {
+  const choices = [...new Set(registered.filter((choice) => choice))].sort((a, b) =>
     a.localeCompare(b, "ja")
   );
   const select = element("select");
@@ -612,23 +613,23 @@ function categoryInput(value, categories) {
     option.value = key;
     select.appendChild(option);
   };
-  addOption("", "（未分類）");
-  choices.forEach((category) => addOption(category, category));
-  addOption(OTHER_CATEGORY, "それ以外（手入力）");
+  addOption("", emptyLabel);
+  choices.forEach((choice) => addOption(choice, choice));
+  addOption(OTHER_CHOICE, "それ以外（手入力）");
 
   const other = textInput("");
-  other.placeholder = "新しい分類を入力";
-  other.classList.add("category-other");
+  other.placeholder = otherPlaceholder;
+  other.classList.add("choice-other");
 
   const showOther = () => {
-    other.hidden = select.value !== OTHER_CATEGORY;
+    other.hidden = select.value !== OTHER_CHOICE;
   };
   select.addEventListener("change", () => {
     showOther();
     if (!other.hidden) other.focus();
   });
-  select.value = choices.includes(value) || value === "" ? value : OTHER_CATEGORY;
-  if (select.value === OTHER_CATEGORY) other.value = value;
+  select.value = choices.includes(value) || value === "" ? value : OTHER_CHOICE;
+  if (select.value === OTHER_CHOICE) other.value = value;
   showOther();
 
   const wrapper = element("div");
@@ -636,10 +637,20 @@ function categoryInput(value, categories) {
   wrapper.appendChild(other);
   const input = {
     get value() {
-      return select.value === OTHER_CATEGORY ? other.value : select.value;
+      return select.value === OTHER_CHOICE ? other.value : select.value;
     },
   };
   return { wrapper, input };
+}
+
+function categoryInput(value, categories) {
+  return choiceInput(value, categories, "（未分類）", "新しい分類を入力");
+}
+
+// 置き場所は家の中で共通なので、在庫と所有物の両方の置き場所から選べるようにする
+function locationInput(value) {
+  const registered = [...data.stock_items, ...data.possessions].map((item) => item.storage_location);
+  return choiceInput(value || "", registered, "（決めない）", "新しい置き場所を入力");
 }
 
 function renderStockTab() {
@@ -676,6 +687,7 @@ function showStockForm(item) {
     value.category || "",
     data.stock_items.map((stockItem) => stockItem.category)
   );
+  const location = locationInput(value.storage_location);
   const cycle = textInput(value.cycle_months, "number");
   const next = textInput(value.next_purchase_date, "date");
   const count = textInput(value.stock_count, "number");
@@ -683,6 +695,7 @@ function showStockForm(item) {
 
   form.appendChild(field("名前", name));
   form.appendChild(field("分類（例: 洗濯・ヘアケア・食品）", category.wrapper));
+  form.appendChild(field("置き場所", location.wrapper));
   form.appendChild(field("買い方", type));
   form.appendChild(amazon.wrapper);
   form.appendChild(field("周期（何か月ごと）", cycle));
@@ -704,6 +717,7 @@ function showStockForm(item) {
         notes: textOrNull(notes),
         is_amazon_subscription: isAmazon,
         category: textOrNull(category.input),
+        storage_location: textOrNull(location.input),
       };
       if (isNew) await send("POST", "/api/v1/inventory/stock", body);
       else await send("PATCH", `/api/v1/inventory/stock/${item.id}`, body);
@@ -808,7 +822,7 @@ function showPossessionForm(item) {
     purchase_date: textInput(value.purchase_date, "date"),
     purchase_price: textInput(value.purchase_price, "number"),
     warranty_expiry_date: textInput(value.warranty_expiry_date, "date"),
-    storage_location: textInput(value.storage_location),
+    storage_location: locationInput(value.storage_location),
     status: selectInput(POSSESSION_STATUS, value.status),
     notes: textArea(value.notes),
   };
@@ -819,7 +833,7 @@ function showPossessionForm(item) {
   form.appendChild(field("購入日", inputs.purchase_date));
   form.appendChild(field("購入金額（円）", inputs.purchase_price));
   form.appendChild(field("保証期限", inputs.warranty_expiry_date));
-  form.appendChild(field("置き場所", inputs.storage_location));
+  form.appendChild(field("置き場所", inputs.storage_location.wrapper));
   form.appendChild(field("状態", inputs.status));
   form.appendChild(field("メモ", inputs.notes));
 
@@ -839,7 +853,7 @@ function showPossessionForm(item) {
         purchase_date: textOrNull(inputs.purchase_date),
         purchase_price: numberOrNull(inputs.purchase_price),
         warranty_expiry_date: textOrNull(inputs.warranty_expiry_date),
-        storage_location: textOrNull(inputs.storage_location),
+        storage_location: textOrNull(inputs.storage_location.input),
         status: inputs.status.value,
         notes: textOrNull(inputs.notes),
       };
