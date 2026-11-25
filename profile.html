@@ -289,7 +289,7 @@ async function showTab() {
       return;
     }
     if (tab.key === "candidates") {
-      candidateCount = loaded.candidates.candidates.length;
+      candidateCount = countCandidates(loaded.candidates);
       renderTabs();
     }
   }
@@ -401,7 +401,67 @@ function lifeEventSection(events, open) {
 
 // ---------- 候補の確認 ----------
 
+// 候補タブの件数（推測の候補＋整理の提案）
+function countCandidates(data) {
+  return data.candidates.length + (data.proposals || []).length;
+}
+
+// 週に1回の記憶の見直しで出た整理の提案（2026-11-25）
+const REASON_LABELS = { conflict: "食い違い", stale: "古いかも", covered: "重なりかも" };
+const MEMORY_TYPE_LABELS = { fact: "事実", preference: "好み", constraint: "制約", note: "メモ" };
+
+function renderProposals(proposals) {
+  app.appendChild(element("h2", null, `記憶の整理の提案（${proposals.length}件）`));
+  app.appendChild(
+    element("p", "muted", "週に1回の見直しで見つけた、食い違い・古くなったかもしれない記憶です。「反映する」で直し、「そのまま」で今のまま残します。")
+  );
+  proposals.forEach((proposal) => {
+    const card = element("div", "card");
+    const head = element("div", "row-sub");
+    head.appendChild(element("span", "badge dislike", REASON_LABELS[proposal.reason_kind] || proposal.reason_kind));
+    head.appendChild(element("span", "badge", MEMORY_TYPE_LABELS[proposal.item_type] || proposal.item_type));
+    head.appendChild(document.createTextNode(formatDate(proposal.created_at)));
+    card.appendChild(head);
+    card.appendChild(element("div", "row-sub", "今の記憶"));
+    card.appendChild(element("div", null, proposal.item_text));
+    card.appendChild(element("div", "row-sub", "理由"));
+    card.appendChild(element("div", null, proposal.explanation));
+    card.appendChild(element("div", "row-sub", "提案"));
+    card.appendChild(
+      element("div", null, proposal.action === "remove" ? "この記憶を外す" : `「${proposal.new_content}」に直す`)
+    );
+
+    const buttons = element("div", "buttons");
+    const apply = element("button", "primary", "反映する");
+    const keep = element("button", "danger", "そのまま");
+    apply.addEventListener("click", () => decideProposal(proposal.id, "apply", [apply, keep]));
+    keep.addEventListener("click", () => decideProposal(proposal.id, "dismiss", [apply, keep]));
+    buttons.append(apply, keep);
+    card.appendChild(buttons);
+    app.appendChild(card);
+  });
+}
+
+async function decideProposal(proposalId, decision, buttons) {
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    loaded.candidates = await callApi(`/api/v1/profile/proposals/${proposalId}/${decision}`, { method: "POST" });
+    candidateCount = countCandidates(loaded.candidates);
+    delete loaded.memory;
+    toast(decision === "apply" ? "記憶を直しました" : "そのままにしました");
+    showTab();
+  } catch (error) {
+    toast(error.message);
+    buttons.forEach((button) => { button.disabled = false; });
+  }
+}
+
 function renderCandidatesTab(data) {
+  if ((data.proposals || []).length) {
+    renderProposals(data.proposals);
+    app.appendChild(element("h2", null, `プロフィール候補（${data.candidates.length}件）`));
+  }
+
   app.appendChild(
     element("p", "muted", "リトルクッキーが会話などから推測したことです。合っていれば「確定」で長期記憶に入ります。")
   );
@@ -438,7 +498,7 @@ async function review(candidateId, decision, buttons) {
   buttons.forEach((button) => { button.disabled = true; });
   try {
     loaded.candidates = await callApi(`/api/v1/profile/candidates/${candidateId}/${decision}`, { method: "POST" });
-    candidateCount = loaded.candidates.candidates.length;
+    candidateCount = countCandidates(loaded.candidates);
     // 確定すると長期記憶が変わるので、次に開いたときに読み直す
     delete loaded.memory;
     toast(decision === "accept" ? "長期記憶に入れました" : "却下しました");
@@ -578,7 +638,7 @@ liff.init({ liffId: "2010907901-q0rIoeNw" })
     callApi("/api/v1/profile/candidates")
       .then((body) => {
         loaded.candidates = body;
-        candidateCount = body.candidates.length;
+        candidateCount = countCandidates(body);
         renderTabs();
       })
       .catch(() => {});
