@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>プロフィール</title>
+<style>
+  body {
+    margin: 0;
+    padding: 0 0 40px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f5f5f5;
+    color: #222;
+    line-height: 1.5;
+  }
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: #f5f5f5;
+    padding: 12px 16px 0;
+  }
+  h1 { font-size: 18px; margin: 0 0 10px; }
+  h2 { font-size: 14px; margin: 20px 0 8px; color: #666; }
+  main { padding: 0 16px; }
+  .tabs { display: flex; gap: 6px; padding-bottom: 10px; }
+  .tab {
+    flex: 1;
+    border: none;
+    border-radius: 18px;
+    padding: 8px 0;
+    font-size: 13px;
+    font-weight: bold;
+    background: #e4e4e4;
+    color: #555;
+    cursor: pointer;
+  }
+  .tab.active { background: #06c755; color: white; }
+  .tab .count {
+    display: inline-block;
+    min-width: 16px;
+    margin-left: 3px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: #cc3300;
+    color: white;
+    font-size: 11px;
+  }
+  .card {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+  .list {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+  }
+  .row { padding: 10px 14px; border-bottom: 1px solid #eee; font-size: 14px; word-break: break-all; }
+  .row:last-child { border-bottom: none; }
+  .row-sub { font-size: 12px; color: #888; margin-top: 2px; }
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: #e0e0e0;
+    color: #333;
+    margin-right: 4px;
+    vertical-align: 1px;
+  }
+  .badge.like { background: #06c755; color: white; }
+  .badge.dislike { background: #cc3300; color: white; }
+  details { margin-bottom: 10px; }
+  details > summary {
+    list-style: none;
+    cursor: pointer;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    padding: 12px 14px;
+    font-weight: bold;
+    font-size: 15px;
+  }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::after { content: "＋"; float: right; color: #999; }
+  details[open] > summary::after { content: "－"; }
+  details[open] > summary { border-radius: 12px 12px 0 0; box-shadow: none; border-bottom: 1px solid #eee; }
+  details[open] > .list { border-radius: 0 0 12px 12px; }
+  .group-label { font-size: 12px; color: #06a045; font-weight: bold; padding: 8px 14px 0; background: #fafafa; }
+  pre {
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-family: inherit;
+    font-size: 13px;
+    margin: 0;
+  }
+  .search { margin: 4px 0 12px; }
+  input {
+    font-size: 16px;
+    padding: 9px 10px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    background: white;
+    box-sizing: border-box;
+    width: 100%;
+  }
+  .buttons { display: flex; gap: 8px; margin-top: 10px; }
+  .buttons button {
+    flex: 1;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 0;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+  button.primary { background: #06c755; color: white; }
+  button.danger { background: white; color: #cc3300; border: 1px solid #cc3300; }
+  button:disabled { opacity: 0.5; }
+  .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin-top: 6px; font-size: 13px; }
+  .metric-label { color: #888; font-size: 11px; }
+  .metric-value { font-weight: bold; }
+  .day-title { font-weight: bold; font-size: 15px; }
+  .empty { padding: 16px; font-size: 13px; color: #999; text-align: center; }
+  .muted { font-size: 12px; color: #999; }
+  .error { color: #cc3300; padding: 16px; }
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 18px;
+    font-size: 13px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+    max-width: 80%;
+    text-align: center;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>プロフィール</h1>
+  <div class="tabs" id="tabs"></div>
+</header>
+<main id="app">読み込み中…</main>
+<div class="toast" id="toast"></div>
+
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+const app = document.getElementById("app");
+const tabsNode = document.getElementById("tabs");
+
+// APIの呼び出し先（URLの先頭部分）。サーバーから配信するときは空文字
+// （同じ場所）、GitHub Pagesから配信するときはngrokのURLが入る
+// （app/web/liff_page.py・scripts/publish_liff_pages.py）
+const API_BASE = "https://agreeable-bullion-survey.ngrok-free.dev";
+
+const TABS = [
+  { key: "memory", label: "長期記憶", path: "/api/v1/profile/memory" },
+  { key: "candidates", label: "候補", path: "/api/v1/profile/candidates" },
+  { key: "health", label: "ヘルス", path: "/api/v1/profile/health" },
+  { key: "prompt", label: "ルール", path: "/api/v1/profile/prompt" },
+];
+
+// 候補の種類の表示名
+const ITEM_TYPE_LABELS = {
+  fact: "事実",
+  preference: "好み",
+  constraint: "制約",
+  life_event: "出来事",
+  daily_state: "日々の状態",
+  note: "メモ",
+};
+
+let currentTab = "memory";
+let memorySearch = "";
+let candidateCount = null;
+// タブごとに読み込んだ内容（タブを行き来しても読み直さない）
+const loaded = {};
+
+// ---------- 共通の部品 ----------
+
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+
+function formatDate(isoText) {
+  if (!isoText) return "";
+  const [year, month, day] = isoText.slice(0, 10).split("-");
+  return `${year}/${Number(month)}/${Number(day)}`;
+}
+
+function formatMinutes(minutes) {
+  if (minutes === null || minutes === undefined) return "－";
+  const total = Math.round(minutes);
+  const hours = Math.floor(total / 60);
+  return hours ? `${hours}時間${String(total % 60).padStart(2, "0")}分` : `${total}分`;
+}
+
+function formatNumber(value, unit, digits = 0) {
+  if (value === null || value === undefined) return "－";
+  return `${Number(value).toLocaleString("ja-JP", { maximumFractionDigits: digits })}${unit}`;
+}
+
+let toastTimer = null;
+function toast(message) {
+  const node = document.getElementById("toast");
+  node.textContent = message;
+  node.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => node.classList.remove("show"), 1800);
+}
+
+function emptyText(text) {
+  const list = element("div", "list");
+  list.appendChild(element("div", "empty", text));
+  return list;
+}
+
+// ---------- APIの呼び出し（本人確認のためLINEのアクセストークンを付ける） ----------
+//
+// ngrok無料プランの警告ページを飛ばすため"ngrok-skip-browser-warning"を付ける
+// （家電操作・フィナンシャルサポート・インベントリと同じ対策）
+
+async function callApi(path, options = {}) {
+  const response = await fetch(API_BASE + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
+      Authorization: `Bearer ${liff.getAccessToken()}`,
+    },
+  });
+  const text = await response.text();
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`サーバーから想定外の応答がありました（${response.status}）`);
+  }
+  if (!response.ok) throw new Error(body.message || "通信に失敗しました");
+  return body;
+}
+
+// ---------- タブ ----------
+
+function renderTabs() {
+  tabsNode.textContent = "";
+  TABS.forEach((tab) => {
+    const button = element("button", "tab" + (tab.key === currentTab ? " active" : ""), tab.label);
+    if (tab.key === "candidates" && candidateCount) {
+      button.appendChild(element("span", "count", String(candidateCount)));
+    }
+    button.addEventListener("click", () => {
+      currentTab = tab.key;
+      try { localStorage.setItem("profileTab", currentTab); } catch (error) {}
+      showTab();
+    });
+    tabsNode.appendChild(button);
+  });
+}
+
+async function showTab() {
+  renderTabs();
+  window.scrollTo(0, 0);
+  const tab = TABS.find((item) => item.key === currentTab);
+
+  if (!loaded[tab.key]) {
+    app.className = "";
+    app.textContent = "読み込み中…";
+    try {
+      loaded[tab.key] = await callApi(tab.path);
+    } catch (error) {
+      app.textContent = "読み込みに失敗しました: " + error.message;
+      app.className = "error";
+      return;
+    }
+    if (tab.key === "candidates") {
+      candidateCount = loaded.candidates.candidates.length;
+      renderTabs();
+    }
+  }
+
+  // 読み込み中に別のタブへ移っていたら、そちらの表示に任せる
+  if (tab.key !== currentTab) return;
+
+  app.className = "";
+  app.textContent = "";
+  RENDERERS[tab.key](loaded[tab.key]);
+}
+
+// ---------- 長期記憶 ----------
+
+function renderMemoryTab(data) {
+  app.appendChild(element("h2", null, "リトルクッキーがあなたについて覚えていること（要約）"));
+  const summary = element("div", "card");
+  summary.appendChild(element("pre", null, data.summary || "（まだありません）"));
+  app.appendChild(summary);
+  app.appendChild(
+    element("p", "muted", "直したいときは、LINEで「〇〇は違うよ」「〇〇を忘れて」と送ってください。")
+  );
+
+  const search = element("input", "search");
+  search.type = "search";
+  search.placeholder = "記憶の中を探す";
+  search.value = memorySearch;
+  app.appendChild(search);
+
+  const results = element("div");
+  app.appendChild(results);
+
+  const renderSections = () => {
+    results.textContent = "";
+    const word = memorySearch.trim();
+    data.sections.forEach((section) => {
+      const items = section.items.filter((item) => !word || matches(item, word));
+      results.appendChild(memorySection(section.label, items, Boolean(word)));
+    });
+    const events = data.life_events.filter((event) => !word || matches(event, word));
+    results.appendChild(lifeEventSection(events, Boolean(word)));
+  };
+
+  search.addEventListener("input", () => {
+    memorySearch = search.value;
+    renderSections();
+  });
+  renderSections();
+}
+
+function matches(item, word) {
+  return `${item.text} ${item.category || ""}`.toLowerCase().includes(word.toLowerCase());
+}
+
+function memorySection(label, items, open) {
+  const details = element("details");
+  details.open = open;
+  details.appendChild(element("summary", null, `${label}（${items.length}件）`));
+
+  if (!items.length) {
+    details.appendChild(emptyText("ありません"));
+    return details;
+  }
+
+  // 分類ごとにまとめる
+  const groups = new Map();
+  items.forEach((item) => {
+    const key = item.category || "未分類";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  });
+
+  const list = element("div", "list");
+  [...groups.keys()].sort().forEach((key) => {
+    list.appendChild(element("div", "group-label", key));
+    groups.get(key).forEach((item) => {
+      const row = element("div", "row");
+      if (item.polarity) {
+        const like = item.polarity === "like";
+        row.appendChild(element("span", "badge " + (like ? "like" : "dislike"), like ? "好き" : "苦手"));
+      }
+      row.appendChild(document.createTextNode(item.text));
+      list.appendChild(row);
+    });
+  });
+  details.appendChild(list);
+  return details;
+}
+
+function lifeEventSection(events, open) {
+  const details = element("details");
+  details.open = open;
+  details.appendChild(element("summary", null, `最近の出来事（${events.length}件）`));
+
+  if (!events.length) {
+    details.appendChild(emptyText("ありません"));
+    return details;
+  }
+
+  const list = element("div", "list");
+  events.forEach((event) => {
+    const row = element("div", "row", event.text);
+    row.appendChild(element("div", "row-sub", `${formatDate(event.date)}${event.category ? "・" + event.category : ""}`));
+    list.appendChild(row);
+  });
+  details.appendChild(list);
+  return details;
+}
+
+// ---------- 候補の確認 ----------
+
+function renderCandidatesTab(data) {
+  app.appendChild(
+    element("p", "muted", "リトルクッキーが会話などから推測したことです。合っていれば「確定」で長期記憶に入ります。")
+  );
+
+  if (!data.candidates.length) {
+    app.appendChild(emptyText("確認待ちの候補はありません"));
+    return;
+  }
+
+  data.candidates.forEach((candidate) => {
+    const card = element("div", "card");
+    const head = element("div", "row-sub");
+    head.appendChild(element("span", "badge", ITEM_TYPE_LABELS[candidate.item_type] || candidate.item_type));
+    head.appendChild(
+      document.createTextNode(
+        `${candidate.category || "未分類"}・自信度${Math.round(candidate.confidence * 100)}%・${formatDate(candidate.created_at)}`
+      )
+    );
+    card.appendChild(head);
+    card.appendChild(element("div", null, candidate.text));
+
+    const buttons = element("div", "buttons");
+    const accept = element("button", "primary", "確定");
+    const reject = element("button", "danger", "却下");
+    accept.addEventListener("click", () => review(candidate.id, "accept", [accept, reject]));
+    reject.addEventListener("click", () => review(candidate.id, "reject", [accept, reject]));
+    buttons.append(accept, reject);
+    card.appendChild(buttons);
+    app.appendChild(card);
+  });
+}
+
+async function review(candidateId, decision, buttons) {
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    loaded.candidates = await callApi(`/api/v1/profile/candidates/${candidateId}/${decision}`, { method: "POST" });
+    candidateCount = loaded.candidates.candidates.length;
+    // 確定すると長期記憶が変わるので、次に開いたときに読み直す
+    delete loaded.memory;
+    toast(decision === "accept" ? "長期記憶に入れました" : "却下しました");
+    showTab();
+  } catch (error) {
+    toast(error.message);
+    buttons.forEach((button) => { button.disabled = false; });
+  }
+}
+
+// ---------- ヘルス ----------
+
+function renderHealthTab(data) {
+  app.appendChild(element("h2", null, `直近${data.days.length}日の健康データ（iPhoneのヘルスケアから）`));
+
+  data.days.forEach((day) => {
+    const card = element("div", "card");
+    card.appendChild(element("div", "day-title", formatDate(day.date)));
+
+    const anything = day.sleep.available || day.activity.available || day.heart.available || day.weight.available;
+    if (!anything) {
+      card.appendChild(element("div", "muted", "データなし"));
+      app.appendChild(card);
+      return;
+    }
+
+    const metrics = element("div", "metrics");
+    const add = (label, value) => {
+      const box = element("div");
+      box.appendChild(element("div", "metric-label", label));
+      box.appendChild(element("div", "metric-value", value));
+      metrics.appendChild(box);
+    };
+    add("睡眠", day.sleep.available ? formatMinutes(day.sleep.total_minutes) : "－");
+    add("深い睡眠／レム", day.sleep.available ? `${formatMinutes(day.sleep.deep_minutes)}／${formatMinutes(day.sleep.rem_minutes)}` : "－");
+    add("歩数", formatNumber(day.activity.steps, "歩"));
+    add("運動", day.activity.workout_count ? `${day.activity.workout_count}回・${formatNumber(day.activity.workout_minutes, "分")}` : "－");
+    add("安静時心拍", formatNumber(day.heart.resting, " bpm"));
+    add("HRV", formatNumber(day.heart.hrv, " ms"));
+    add("活動消費", formatNumber(day.activity.active_energy_kcal, " kcal"));
+    add("体重", formatNumber(day.weight.kg, " kg", 1));
+    card.appendChild(metrics);
+    app.appendChild(card);
+  });
+
+  app.appendChild(element("h2", null, "日々の状態（会話から記録した疲れ・気分）"));
+  if (!data.daily_states.length) {
+    app.appendChild(emptyText("記録はありません"));
+    return;
+  }
+  const list = element("div", "list");
+  data.daily_states.forEach((state) => {
+    const parts = [];
+    if (state.fatigue_level !== null && state.fatigue_level !== undefined) parts.push(`疲れ ${state.fatigue_level}`);
+    if (state.mood) parts.push(`気分 ${state.mood}`);
+    const row = element("div", "row", parts.join("・") || "－");
+    if (state.notes) row.appendChild(element("div", "row-sub", state.notes));
+    row.appendChild(element("div", "row-sub", formatDate(state.date)));
+    list.appendChild(row);
+  });
+  app.appendChild(list);
+}
+
+// ---------- ルールとプロンプト ----------
+
+function renderPromptTab(data) {
+  app.appendChild(element("h2", null, `会話ルール（${data.rules.length}件）`));
+  app.appendChild(
+    element("p", "muted", "LINEで「今後〇〇のときは△△して」と頼むと増えます。消したいときもLINEで頼んでください。")
+  );
+  if (!data.rules.length) {
+    app.appendChild(emptyText("会話ルールはありません"));
+  } else {
+    const list = element("div", "list");
+    data.rules.forEach((rule) => {
+      const row = element("div", "row", rule.text);
+      if (rule.updated_at) row.appendChild(element("div", "row-sub", formatDate(rule.updated_at)));
+      list.appendChild(row);
+    });
+    app.appendChild(list);
+  }
+
+  app.appendChild(element("h2", null, "毎回AIに送っているプロンプト"));
+  app.appendChild(
+    element(
+      "p",
+      "muted",
+      "会話のたびに、下の「基本の指示」と「毎回付ける情報」を送っています。そのあとに、これまでの会話と今回の質問が続きます。"
+    )
+  );
+
+  const system = element("details");
+  system.appendChild(element("summary", null, `基本の指示（${data.system_prompt.length.toLocaleString()}文字）`));
+  const systemCard = element("div", "card");
+  systemCard.style.borderRadius = "0 0 12px 12px";
+  systemCard.appendChild(element("pre", null, data.system_prompt));
+  system.appendChild(systemCard);
+  app.appendChild(system);
+
+  data.standing_blocks.forEach((block) => {
+    // 「【見出し】\n本文」の形なので、見出しを折りたたみの題名にする
+    const match = block.match(/^【(.+?)】\n?([\s\S]*)$/);
+    // 「会話ルール（必ず守ること。…）」のような長い見出しは、括弧の前までにする
+    const title = match ? match[1].split("（")[0] : "その他";
+    const body = match ? match[2] : block;
+    const details = element("details");
+    details.appendChild(element("summary", null, title));
+    const card = element("div", "card");
+    card.style.borderRadius = "0 0 12px 12px";
+    card.appendChild(element("pre", null, body));
+    details.appendChild(card);
+    app.appendChild(details);
+  });
+}
+
+const RENDERERS = {
+  memory: renderMemoryTab,
+  candidates: renderCandidatesTab,
+  health: renderHealthTab,
+  prompt: renderPromptTab,
+};
+
+// ---------- 起動 ----------
+
+liff.init({ liffId: "2010907901-q0rIoeNw" })
+  .then(async () => {
+    // LINEの外（普通のブラウザ）で開いた場合はログインしてから表示する
+    if (!liff.isLoggedIn()) {
+      liff.login();
+      return;
+    }
+    try {
+      const saved = localStorage.getItem("profileTab");
+      if (TABS.some((tab) => tab.key === saved)) currentTab = saved;
+    } catch (error) {}
+    // 候補の件数をタブに出すため、候補だけは最初に読んでおく
+    callApi("/api/v1/profile/candidates")
+      .then((body) => {
+        loaded.candidates = body;
+        candidateCount = body.candidates.length;
+        renderTabs();
+      })
+      .catch(() => {});
+    showTab();
+  })
+  .catch((error) => {
+    app.textContent = "読み込みに失敗しました: " + error.message;
+    app.className = "error";
+  });
+</script>
+</body>
+</html>
