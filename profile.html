@@ -99,7 +99,8 @@
     margin: 0;
   }
   .search { margin: 4px 0 12px; }
-  input {
+  input, textarea {
+    font-family: inherit;
     font-size: 16px;
     padding: 9px 10px;
     border: 1px solid #ccc;
@@ -108,7 +109,13 @@
     box-sizing: border-box;
     width: 100%;
   }
-  .buttons { display: flex; gap: 8px; margin-top: 10px; }
+  textarea { min-height: 80px; margin-top: 8px; }
+  .buttons { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  button.secondary { background: #e0e0e0; color: #333; }
+  .buttons.stacked { flex-direction: column; }
+  .buttons.stacked button { width: 100%; }
+  .proposal-label { font-size: 12px; color: #888; margin-top: 8px; }
+  .question { font-weight: bold; }
   .buttons button {
     flex: 1;
     border: none;
@@ -411,44 +418,91 @@ const REASON_LABELS = { conflict: "食い違い", stale: "古いかも", covered
 const MEMORY_TYPE_LABELS = { fact: "事実", preference: "好み", constraint: "制約", note: "メモ" };
 
 function renderProposals(proposals) {
-  app.appendChild(element("h2", null, `記憶の整理の提案（${proposals.length}件）`));
+  app.appendChild(element("h2", null, `記憶の整理の候補（${proposals.length}件）`));
   app.appendChild(
-    element("p", "muted", "週に1回の見直しで見つけた、食い違い・古くなったかもしれない記憶です。「反映する」で直し、「そのまま」で今のまま残します。")
+    element(
+      "p",
+      "muted",
+      "週に1回の見直しで見つけた、食い違い・古くなったかもしれない記憶です。提案どおりにするか、今の記憶のまま残すか、自分で書き直すかを選んでください。外した記憶も履歴には残ります。"
+    )
   );
-  proposals.forEach((proposal) => {
-    const card = element("div", "card");
-    const head = element("div", "row-sub");
-    head.appendChild(element("span", "badge dislike", REASON_LABELS[proposal.reason_kind] || proposal.reason_kind));
-    head.appendChild(element("span", "badge", MEMORY_TYPE_LABELS[proposal.item_type] || proposal.item_type));
-    head.appendChild(document.createTextNode(formatDate(proposal.created_at)));
-    card.appendChild(head);
-    card.appendChild(element("div", "row-sub", "今の記憶"));
-    card.appendChild(element("div", null, proposal.item_text));
-    card.appendChild(element("div", "row-sub", "理由"));
-    card.appendChild(element("div", null, proposal.explanation));
-    card.appendChild(element("div", "row-sub", "提案"));
-    card.appendChild(
-      element("div", null, proposal.action === "remove" ? "この記憶を外す" : `「${proposal.new_content}」に直す`)
-    );
-
-    const buttons = element("div", "buttons");
-    const apply = element("button", "primary", "反映する");
-    const keep = element("button", "danger", "そのまま");
-    apply.addEventListener("click", () => decideProposal(proposal.id, "apply", [apply, keep]));
-    keep.addEventListener("click", () => decideProposal(proposal.id, "dismiss", [apply, keep]));
-    buttons.append(apply, keep);
-    card.appendChild(buttons);
-    app.appendChild(card);
-  });
+  proposals.forEach((proposal) => app.appendChild(proposalCard(proposal)));
 }
 
-async function decideProposal(proposalId, decision, buttons) {
+// 提案の中身に合わせて、押すと何が起きるかが分かるボタン名にする（2026-11-26、本人の要望）
+function proposalCard(proposal) {
+  const isQuestion = proposal.action === "update" && !proposal.new_content;
+  const card = element("div", "card");
+  const head = element("div", "row-sub");
+  const kind = isQuestion ? "質問" : REASON_LABELS[proposal.reason_kind] || proposal.reason_kind;
+  head.appendChild(element("span", "badge dislike", kind));
+  head.appendChild(element("span", "badge", MEMORY_TYPE_LABELS[proposal.item_type] || proposal.item_type));
+  head.appendChild(document.createTextNode(formatDate(proposal.created_at)));
+  card.appendChild(head);
+
+  card.appendChild(element("div", "proposal-label", "今の記憶"));
+  card.appendChild(element("div", null, proposal.item_text));
+  card.appendChild(element("div", "proposal-label", isQuestion ? "リトルクッキーからの質問" : "理由"));
+  card.appendChild(element("div", isQuestion ? "question" : null, proposal.explanation));
+  if (!isQuestion) {
+    card.appendChild(element("div", "proposal-label", "提案"));
+    card.appendChild(
+      element("div", null, proposal.action === "remove" ? "この記憶を長期記憶から外す" : `「${proposal.new_content}」に直す`)
+    );
+  }
+
+  // 自分で書き直す（質問のときは最初から答えの欄を出す）
+  const editor = element("textarea");
+  editor.value = isQuestion ? "" : proposal.new_content || proposal.item_text;
+  editor.placeholder = isQuestion ? "答えを書くと、その内容で記憶を書き直します" : "長期記憶に残したい文に書き直してください";
+  editor.hidden = !isQuestion;
+  card.appendChild(editor);
+
+  // 3つ並べると狭いので、提案のボタンは縦に並べる
+  const buttons = element("div", "buttons stacked");
+  const all = [];
+  const add = (label, className, onClick) => {
+    const button = element("button", className, label);
+    button.addEventListener("click", () => onClick(all));
+    buttons.appendChild(button);
+    all.push(button);
+    return button;
+  };
+  const saveRewrite = (disabled) => {
+    if (!editor.value.trim()) { toast("文を書いてください"); return; }
+    decideProposal(proposal.id, "rewrite", disabled, { content: editor.value });
+  };
+
+  if (isQuestion) {
+    add("答えを保存", "primary", saveRewrite);
+  } else {
+    add(proposal.action === "remove" ? "外す" : "この文に直す", "primary", (disabled) => decideProposal(proposal.id, "apply", disabled));
+    const rewrite = add("自分で書き直す", "secondary", (disabled) => {
+      if (editor.hidden) {
+        editor.hidden = false;
+        editor.focus();
+        rewrite.textContent = "書き直した文で保存";
+        return;
+      }
+      saveRewrite(disabled);
+    });
+  }
+  add("今の記憶のまま残す", "danger", (disabled) => decideProposal(proposal.id, "dismiss", disabled));
+
+  card.appendChild(buttons);
+  return card;
+}
+
+async function decideProposal(proposalId, decision, buttons, body) {
   buttons.forEach((button) => { button.disabled = true; });
   try {
-    loaded.candidates = await callApi(`/api/v1/profile/proposals/${proposalId}/${decision}`, { method: "POST" });
+    loaded.candidates = await callApi(`/api/v1/profile/proposals/${proposalId}/${decision}`, {
+      method: "POST",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
     candidateCount = countCandidates(loaded.candidates);
     delete loaded.memory;
-    toast(decision === "apply" ? "記憶を直しました" : "そのままにしました");
+    toast({ apply: "記憶を直しました", rewrite: "書き直しました", dismiss: "今の記憶のまま残しました" }[decision]);
     showTab();
   } catch (error) {
     toast(error.message);
