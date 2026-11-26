@@ -414,7 +414,7 @@ function countCandidates(data) {
 }
 
 // 週に1回の記憶の見直しで出た整理の提案（2026-11-25）
-const REASON_LABELS = { conflict: "食い違い", stale: "古いかも", covered: "重なりかも" };
+const REASON_LABELS = { conflict: "食い違い", stale: "古いかも", unclear: "分かりにくい", covered: "重なりかも" };
 const MEMORY_TYPE_LABELS = { fact: "事実", preference: "好み", constraint: "制約", note: "メモ" };
 
 function renderProposals(proposals) {
