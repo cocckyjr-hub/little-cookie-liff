@@ -96,7 +96,8 @@
   }
   .counter button.plus { background: #06c755; color: white; }
   .count { min-width: 28px; text-align: center; font-size: 18px; font-weight: bold; }
-  .count.zero { color: #cc3300; }
+  /* 安全在庫を下回った（安全在庫が未設定なら0になった）とき。2026-11-28 */
+  .count.low { color: white; background: #cc3300; border-radius: 6px; padding: 0 4px; }
   .count.unknown { color: #bbb; font-size: 14px; }
   .check {
     width: 26px;
@@ -510,6 +511,13 @@ function makeSortable(listNode, kind) {
 
 // ---------- 在庫 ----------
 
+// 安全在庫を下回っているか（安全在庫が未設定なら0のとき。サーバーのis_below_safety_stockと同じ）
+function isBelowSafetyStock(item) {
+  if (item.stock_count === null || item.stock_count === undefined) return false;
+  if (item.safety_stock === null || item.safety_stock === undefined) return item.stock_count === 0;
+  return item.stock_count < item.safety_stock;
+}
+
 function stockSub(item) {
   const parts = [];
   if (item.is_amazon_subscription) {
@@ -519,6 +527,8 @@ function stockSub(item) {
     parts.push(`次の購入 ${formatDate(item.next_purchase_date)}`);
   }
   if (item.storage_location) parts.push(item.storage_location);
+  if (item.safety_stock !== null && item.safety_stock !== undefined) parts.push(`安全在庫${item.safety_stock}`);
+  if (item.units_per_order > 1) parts.push(`1回で${item.units_per_order}個届く`);
   return parts.join("・");
 }
 
@@ -546,16 +556,18 @@ function stockRow(item) {
       count.className = "count unknown";
     } else {
       count.textContent = item.stock_count;
-      count.className = "count" + (item.stock_count === 0 ? " zero" : "");
+      count.className = "count" + (isBelowSafetyStock(item) ? " low" : "");
     }
   }
 
   async function adjust(delta, button) {
     await runAction(button, async () => {
       const updated = await send("POST", `/api/v1/inventory/stock/${item.id}/adjust`, { delta });
+      const wasBelow = isBelowSafetyStock(item);
       item.stock_count = updated.stock_count;
       showCount();
       if (updated.stock_count === 0) toast(`${item.item_name}の在庫が0になりました`);
+      else if (!wasBelow && isBelowSafetyStock(item)) toast(`${item.item_name}が安全在庫を下回りました`);
     });
   }
 
@@ -675,6 +687,7 @@ function showStockForm(item) {
   const value = item || {
     item_name: "", purchase_type: "as_needed", cycle_months: null,
     next_purchase_date: null, stock_count: null, notes: "", is_amazon_subscription: 0,
+    safety_stock: null, units_per_order: null,
   };
   const form = element("div", "form");
   const name = textInput(value.item_name);
@@ -691,6 +704,8 @@ function showStockForm(item) {
   const cycle = textInput(value.cycle_months, "number");
   const next = textInput(value.next_purchase_date, "date");
   const count = textInput(value.stock_count, "number");
+  const safety = textInput(value.safety_stock, "number");
+  const units = textInput(value.units_per_order, "number");
   const notes = textArea(value.notes);
 
   form.appendChild(field("名前", name));
@@ -701,6 +716,8 @@ function showStockForm(item) {
   form.appendChild(field("周期（何か月ごと）", cycle));
   form.appendChild(field("次のお届け・購入日", next));
   form.appendChild(field("在庫数", count));
+  form.appendChild(field("安全在庫（これより少なくなると在庫数が赤くなり、棚卸しの日に知らせる）", safety));
+  form.appendChild(field("1回で届く個数（3パック入りなら3。空欄なら最初の配達のときにAIが読み取る）", units));
   form.appendChild(field("メモ", notes));
 
   const buttons = element("div", "form-buttons");
@@ -714,6 +731,8 @@ function showStockForm(item) {
         cycle_months: numberOrNull(cycle),
         next_purchase_date: textOrNull(next),
         stock_count: numberOrNull(count),
+        safety_stock: numberOrNull(safety),
+        units_per_order: numberOrNull(units),
         notes: textOrNull(notes),
         is_amazon_subscription: isAmazon,
         category: textOrNull(category.input),
