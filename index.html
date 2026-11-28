@@ -44,6 +44,11 @@
   .device-status.off { color: #999; }
   .device-status.loading,
   .device-status.error { color: #cc8400; }
+  .bedtime-note {
+    font-size: 12px;
+    color: #888;
+    margin-top: 2px;
+  }
   .buttons { display: flex; gap: 8px; }
   button {
     border: none;
@@ -219,8 +224,79 @@ function renderOverview() {
   });
   list.appendChild(alarmCard);
 
+  // 寝る時間の自動オフ（起きる時刻の8時間前に、Chromeキャスト・照明・エアコンを消す）
+  const bedtimeCard = el(`
+    <div class="card device-card" id="card-bedtime-off">
+      <div>
+        <div class="device-name">寝る時間に自動オフ</div>
+        <div class="device-status loading" id="status-bedtime-off">確認中...</div>
+        <div class="bedtime-note">起きる8時間前にChromeキャスト・照明・エアコンを消す</div>
+      </div>
+      <div class="buttons">
+        <button class="on-button" id="on-bedtime-off">ON</button>
+        <button class="off-button" id="off-bedtime-off">OFF</button>
+      </div>
+    </div>
+  `);
+  list.appendChild(bedtimeCard);
+  document.getElementById("on-bedtime-off").addEventListener("click", () => setBedtimeOffEnabled(true));
+  document.getElementById("off-bedtime-off").addEventListener("click", () => setBedtimeOffEnabled(false));
+
   fetchStatuses();
   fetchAlarmOverviewStatus();
+  fetchBedtimeOffStatus();
+}
+
+// 寝る時間の自動オフの状態を「ON（次回 0:00に消す）」のように出す
+function showBedtimeOffStatus(data) {
+  const statusEl = document.getElementById("status-bedtime-off");
+  if (!statusEl) return;
+  statusEl.classList.remove("loading", "error");
+
+  if (!data.enabled) {
+    statusEl.textContent = "OFF";
+  } else if (data.next_off_at) {
+    statusEl.textContent = `ON（次回 ${data.next_off_at.substring(11, 16)}に消す）`;
+  } else {
+    statusEl.textContent = "ON（目覚ましが未設定のため、今は予定なし）";
+  }
+}
+
+function showBedtimeOffError() {
+  const statusEl = document.getElementById("status-bedtime-off");
+  if (!statusEl) return;
+  statusEl.classList.remove("loading");
+  statusEl.classList.add("error");
+  statusEl.textContent = "取得できませんでした";
+}
+
+async function fetchBedtimeOffStatus() {
+  try {
+    showBedtimeOffStatus(await callApi("/api/v1/appliances/bedtime-off/detail"));
+  } catch (error) {
+    showBedtimeOffError();
+  }
+}
+
+async function setBedtimeOffEnabled(enabled) {
+  const buttons = [
+    document.getElementById("on-bedtime-off"),
+    document.getElementById("off-bedtime-off"),
+  ];
+  buttons.forEach((button) => { if (button) button.disabled = true; });
+
+  try {
+    const data = await callApi("/api/v1/appliances/bedtime-off/enabled", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    showBedtimeOffStatus(data);
+  } catch (error) {
+    showBedtimeOffError();
+  } finally {
+    buttons.forEach((button) => { if (button) button.disabled = false; });
+  }
 }
 
 async function fetchAlarmOverviewStatus() {
