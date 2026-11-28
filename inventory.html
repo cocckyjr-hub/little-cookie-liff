@@ -96,7 +96,7 @@
   }
   .counter button.plus { background: #06c755; color: white; }
   .count { min-width: 28px; text-align: center; font-size: 18px; font-weight: bold; }
-  /* 安全在庫を下回った（安全在庫が未設定なら0になった）とき。2026-11-28 */
+  /* 安全在庫を下回ったとき（安全在庫が未設定の品目は0でも赤くしない）。2026-11-28 */
   .count.low { color: white; background: #cc3300; border-radius: 6px; padding: 0 4px; }
   .count.unknown { color: #bbb; font-size: 14px; }
   .check {
@@ -511,10 +511,10 @@ function makeSortable(listNode, kind) {
 
 // ---------- 在庫 ----------
 
-// 安全在庫を下回っているか（安全在庫が未設定なら0のとき。サーバーのis_below_safety_stockと同じ）
+// 安全在庫を下回っているか（安全在庫が未設定なら赤くしない。サーバーのis_below_safety_stockと同じ）
 function isBelowSafetyStock(item) {
   if (item.stock_count === null || item.stock_count === undefined) return false;
-  if (item.safety_stock === null || item.safety_stock === undefined) return item.stock_count === 0;
+  if (item.safety_stock === null || item.safety_stock === undefined) return false;
   return item.stock_count < item.safety_stock;
 }
 
